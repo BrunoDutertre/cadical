@@ -59,7 +59,7 @@ template<class I, class Rank> void rsort (I first, I last, Rank rank)
 #endif
 
   I a = first, b = last, c = a;
-  T * v = 0;
+  std::vector<T> * v = 0;
 
   for (size_t i = 0; i < 8 * sizeof (size_t); i += l) {
 
@@ -86,8 +86,9 @@ template<class I, class Rank> void rsort (I first, I last, Rank rank)
 
     if (!v) {
       assert (c == a);
-      v = new T [n];
-      b = I (v);
+      //      v = new T [n];
+      v = new std::vector<T>(n);
+      b = v->begin();
     }
 
     I d = (c == a) ? b : a;
@@ -105,7 +106,7 @@ template<class I, class Rank> void rsort (I first, I last, Rank rank)
     for (size_t i = 0; i < n; i++)
       a[i] = b[i];
   }
-  if (v) delete [] (v);
+  if (v) delete (v);
 
 #ifdef CADICAL_RADIX_BUCKETS_ON_THE_HEAP
   delete [] count;

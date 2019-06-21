@@ -28,7 +28,8 @@ case x"$status" in
 esac
 ( 
   grep '^v' $1;
-  sed -e 's,^\(.*\) 0 \(.*\) 0$,c \1\nw \2,' $2
+  sed -e 's,^\(.*\) 0 \(.*\) 0$,c \1\
+w \2,' $2
 ) | \
 awk '
 function abs (i) { return i < 0 ? -i : i }
