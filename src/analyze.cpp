@@ -280,9 +280,10 @@ void Internal::clear_analyzed_levels () {
 struct analyze_trail_negative_rank {
   Internal * internal;
   analyze_trail_negative_rank (Internal * s) : internal (s) { }
-  size_t operator () (int a) {
+  // BD: size_t may not be large enough. It's better to use uint64_t.
+  uint64_t operator () (int a) {
     Var & v = internal->var (a);
-    size_t res = v.level;
+    uint64_t res = v.level;
     res <<= 32;
     res |= v.trail;
     return ~res;
