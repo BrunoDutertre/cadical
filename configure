@@ -307,7 +307,7 @@ esac
 feature=./configure-hello-world
 cat <<EOF > $feature.cpp
 #include <iostream>
-int main () { std::cout << "hello world" << std::endl; }
+int main () { std::cout << "hello world"; }
 EOF
 if $CXX $CXXFLAGS $WERROR -o $feature.exe $feature.cpp 2>>configure.log
 then
