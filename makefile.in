@@ -43,13 +43,23 @@ all: libcadical.a cadical mobical
 # tester 'mobical') and the library are the main build targets.
 
 cadical: cadical.o libcadical.a makefile
-	$(COMPILE) -o $@ $< -L. -lcadical
+	$(COMPILE) -o $@ $< -L. libcadical.a
 
 mobical: mobical.o libcadical.a makefile
-	$(COMPILE) -o $@ $< -L. -lcadical
+	$(COMPILE) -o $@ $< -L. libcadical.a
 
 libcadical.a: $(OBJ) makefile
 	ar rc $@ $(OBJ)
+
+#
+# Dynamic libraries
+#
+libcadical.so: $(OBJ)
+	$(CXX) -shared -o $@ $(OBJ)
+
+libcadical.dylib: $(OBJ)
+	$(CXX) -shared -o $@ $(OBJ)
+
 
 #--------------------------------------------------------------------------#
 
