@@ -296,6 +296,14 @@ esac
 
 # Check that compilation flags work.
 
+#
+# BD: removed the std::endl in this test program.
+# This causes problem when cross-compiling with mingw on cygwin
+# (because std::endl produces "\r\n" and the shell test fails later).
+# I.e., `$feature.exe` prints "hello word" with an extra line,
+# which is not equal to "hello word"
+#
+
 feature=./configure-hello-world
 cat <<EOF > $feature.cpp
 #include <iostream>
@@ -323,18 +331,27 @@ fi
 # explicitly enforce the new standard with '-std=c++0x'.  Here we try to
 # figure out whether we need that flag.
 
-feature=./configure-requires-c++0x
+# BD: changed this to std=c++11 and added -Werror to the test below to force
+# -std=c++11 if the compiler gives warnings. Without this, some versions of
+# clang++ (e.g., apple's# version 10.0.1) give a lot of warnings:
+#
+# warning: 'auto' type specifier is a C++11 extension [-Wc++11-extensions]
+#
+# Also removed thte "\n" in printf to avoid issues with mingw/cygwin.
+#
+
+feature=./configure-requires-c++11
 cat <<EOF > $feature.cpp
 #include <cstdio>
 #include <vector>
 
 // old variadic macro usage 'ARGS...' / '#ARGS' discouraged in g++-7...
-// new variadic macro usage '...' / '__VA_ARGS__' available in C99/C++0x
+// new variadic macro usage '...' / '__VA_ARGS__' available in C99/c++11
 //
-#define MACRO(FMT, ...) printf (FMT "\n", __VA_ARGS__)
+#define MACRO(FMT, ...) printf (FMT , __VA_ARGS__)
 
 // we use ranged for loops which became available in gcc 4.6 and for
-// the gcc 4.6 as well as 4.8 requires '-std=c++0x' too.
+// the gcc 4.6 as well as 4.8 requires '-std=c++11' too.
 //
 unsigned f (const std::vector<unsigned> & a) {
   unsigned res = 0;
@@ -348,22 +365,22 @@ if $CXX $CXXFLAGS $WERROR -o $feature.exe $feature.cpp 2>>configure.log
 then
   if [ "`$feature.exe 2>>configure.log`" = 42 ]
   then
-    msg "compiler supports all required C99/C++0x extensions"
+    msg "compiler supports all required C99/c++11 extensions"
   else
-    die "checking compilation without '-std=c++0x' failed"
+    die "checking compilation without '-std=c++11' failed"
   fi
 else
-  CXXFLAGS="$CXXFLAGS -std=c++0x"
+  CXXFLAGS="$CXXFLAGS -std=c++11"
   if $CXX $CXXFLAGS -o $feature.exe $feature.cpp 2>>configure.log
   then
     if [ "`$feature.exe 2>>configure.log`" = 42 ]
     then
-      msg "using '-std=c++0x' for all required C99/C++0x extensions"
+      msg "using '-std=c++11' for all required C99/c++11 extensions"
     else
-      die "checking compilation with '-std=c++0x' failed"
+      die "checking compilation with '-std=c++11' failed"
     fi
   else
-    die "compiler does not support C99/C++0x even with '-std=c++0x'"
+    die "compiler does not support C99/C++11 even with '-std=c++11'"
   fi
 fi
 
