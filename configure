@@ -100,6 +100,7 @@ where '<option>' is one of the following
 -m32               pass '-m32' to the compiler (compile for 32 bit)
 -ggdb3             pass '-ggdb3' to makefile (like '-s')
 -O|-O[123]         pass '-O' or '-O[123]' to the makefile
+-static...         pass '-static...' option to makefile
 
 The environment variable CXX can be used to set a different C++
 compiler than the default 'g++'.  Similarly you can add additional
@@ -155,6 +156,7 @@ do
     -m32) options="$options $1";m32=yes;;
     -f*|-ggdb3|-O|-O1|-O2|-O3) options="$options $1";;
     -s|--symbols) options="$options -ggdb3";;
+    -static*) options="$options $1";;
 
     CXX=*)
       CXX="`expr \"$1\" : 'CXX=\(.*\)'`"
@@ -235,13 +237,24 @@ msg "root directory '$root'"
 
 #--------------------------------------------------------------------------#
 
+src="$root/src"
+
+if [ -d "$src" ]
+then
+  msg "source directory '$src'"
+else
+  die "could not find source director '$src'"
+fi
+
+#--------------------------------------------------------------------------#
+
 # Prepare '@CXX@' and '@CXXFLAGS@' parameters for 'makefile.in'
 
 [ x"$CXX" = x ] && CXX=g++
 [ x"$CXXFLAGS" = x ] || CXXFLAGS="$CXXFLAGS "
 
 case x"$CXX" in
-  xg++*|xclang++*) CXXFLAGS="${CXXFLAGS}-Wall -Wextra";;
+  x*g++*|x*clang++*) CXXFLAGS="${CXXFLAGS}-Wall -Wextra";;
   *) CXXFLAGS="${CXXFLAGS}-W";;
 esac
 
@@ -250,7 +263,7 @@ then
   CXXFLAGS="$CXXFLAGS -g"
 else
   case x"$CXX" in
-    xg++*|xclang++*) CXXFLAGS="$CXXFLAGS -O3";;
+    x*g++*|x*clang++*) CXXFLAGS="$CXXFLAGS -O3";;
     *) CXXFLAGS="$CXXFLAGS -O";;
   esac
 fi
@@ -258,7 +271,7 @@ fi
 if [ $m32 = yes ]
 then
   case x"$CXX" in
-    xg++*)
+    x*g++*)
       options="$options -mpc64"
       msg "forcing portable 64-bit FPU mode ('-mpc64') for '$CXX'"
       ;;
@@ -277,7 +290,14 @@ fi
 [ $quiet = yes ] && CXXFLAGS="$CXXFLAGS -DQUIET"
 [ $profile = yes ] && CXXFLAGS="$CXXFLAGS -pg"
 [ $coverage = yes ] && CXXFLAGS="$CXXFLAGS -ftest-coverage -fprofile-arcs"
-[ $pedantic = yes ] && CXXFLAGS="$CXXFLAGS --pedantic -Werror"
+if [ $pedantic = yes ]
+then
+  CXXFLAGS="$CXXFLAGS --pedantic -Werror -std=c++11"
+  case x"$CXX" in
+    x*g++*|x*clang++*) CXXFLAGS="${CXXFLAGS} -Wp,-D_GLIBCXX_ASSERTIONS"
+    ;;
+  esac
+fi
 [ $contracts = no ] && CXXFLAGS="$CXXFLAGS -DNCONTRACTS"
 [ $tracing = no ] && CXXFLAGS="$CXXFLAGS -DNTRACING"
 
@@ -286,7 +306,7 @@ CXXFLAGS="$CXXFLAGS$options"
 #--------------------------------------------------------------------------#
 
 case x"$CXX" in
-  xg++* | xclang++*) WERROR="-Werror -pedantic";;
+  x*g++* | x*clang++*) WERROR="-Werror -pedantic";;
   *) WERROR="";;
 esac
 
@@ -307,7 +327,7 @@ int main () { std::cout << "hello world"; }
 EOF
 if $CXX $CXXFLAGS $WERROR -o $feature.exe $feature.cpp 2>>configure.log
 then
-  if [ ! "`$feature.exe 2>>configure.log`" = "hello world" ]
+  if [ ! "`$feature.exe 2>>configure.log|tr -d '\r'`" = "hello world" ]
   then
     die "execution of '$feature.exe' failed"
   fi
@@ -317,24 +337,17 @@ fi
 
 #--------------------------------------------------------------------------#
 
-# Since C99/C++0x is becoming the standard newer versions of 'g++' (7.3 for
+# Since C99/C++11 is becoming the standard newer versions of 'g++' (7.3 for
 # instance) discourage certain GCC extensions, particularly the GCC version
 # of variadic macros, if the same concept exists in the standard.  This
 # forced us to replace all GCC style 'ARGS...' macros with '...' and
 # '__VA_ARGS__'.  Otherwise compiling the library with '--pedantic -Werror'
 # would fail (configuration flag '-p').  However, older versions of 'gcc'
 # (such as 4.8) would disallow these new forms of macros unless we
-# explicitly enforce the new standard with '-std=c++0x'.  Here we try to
-# figure out whether we need that flag.
-
-# BD: changed this to std=c++11 and added -Werror to the test below to force
-# -std=c++11 if the compiler gives warnings. Without this, some versions of
-# clang++ (e.g., apple's# version 10.0.1) give a lot of warnings:
-#
-# warning: 'auto' type specifier is a C++11 extension [-Wc++11-extensions]
-#
-# Also removed thte "\n" in printf to avoid issues with mingw/cygwin.
-#
+# explicitly enforce the new standard with '-std=c++11'.  Here we try to
+# figure out whether we need that flag.  In earlier versions we used
+# '-std=c++0x' but due to issues with older MacOS builds we switched to
+# '-std=c++11' instead.
 
 feature=./configure-requires-c++11
 cat <<EOF > $feature.cpp
@@ -342,7 +355,7 @@ cat <<EOF > $feature.cpp
 #include <vector>
 
 // old variadic macro usage 'ARGS...' / '#ARGS' discouraged in g++-7...
-// new variadic macro usage '...' / '__VA_ARGS__' available in C99/c++11
+// new variadic macro usage '...' / '__VA_ARGS__' available in C99/C++11
 //
 #define MACRO(FMT, ...) printf (FMT , __VA_ARGS__)
 
@@ -355,13 +368,14 @@ unsigned f (const std::vector<unsigned> & a) {
   return res;
 }
 
+
 int main () { MACRO ("%d", 42); return 0; }
 EOF
 if $CXX $CXXFLAGS $WERROR -o $feature.exe $feature.cpp 2>>configure.log
 then
-  if [ "`$feature.exe 2>>configure.log`" = 42 ]
+  if [ "`$feature.exe 2>>configure.log|tr -d '\r'`" = 42 ]
   then
-    msg "compiler supports all required C99/c++11 extensions"
+    msg "compiler supports all required C99/C++11 extensions"
   else
     die "checking compilation without '-std=c++11' failed"
   fi
@@ -369,9 +383,9 @@ else
   CXXFLAGS="$CXXFLAGS -std=c++11"
   if $CXX $CXXFLAGS -o $feature.exe $feature.cpp 2>>configure.log
   then
-    if [ "`$feature.exe 2>>configure.log`" = 42 ]
+    if [ "`$feature.exe 2>>configure.log|tr -d '\r'`" = 42 ]
     then
-      msg "using '-std=c++11' for all required C99/c++11 extensions"
+      msg "using '-std=c++11' for all required C99/C++11 extensions"
     else
       die "checking compilation with '-std=c++11' failed"
     fi
@@ -455,6 +469,7 @@ clean:
 	  fi; \\
 	  rm -rf "\$(CADICALBUILD)"; \\
 	fi
+	rm -f "$src/makefile"
 	rm -f "$makefile"
 test:
 	\$(MAKE) -C "\$(CADICALBUILD)" test
@@ -469,5 +484,19 @@ EOF
 
 msg "generated '../makefile' as proxy to ..."
 msg "... '$build/makefile'"
+
+#--------------------------------------------------------------------------#
+
+if [ -f $src/makefile ]
+then
+  msg "removing '$src/makefile'"
+  rm -f $src/makefile
+fi
+
+msg "linking '$root/makefile'"
+ln -s $root/makefile $src/makefile
+
+#--------------------------------------------------------------------------#
+
 msg "now run ${HILITE}'make'${NORMAL} to compile CaDiCaL"
 msg "optionally run 'make test'"
