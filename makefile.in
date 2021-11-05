@@ -10,6 +10,8 @@
 CXX=@CXX@
 CXXFLAGS=@CXXFLAGS@
 
+LIBS=@LIBS@
+
 ############################################################################
 #    It is usually not necessary to change anything below this line!       #
 ############################################################################
@@ -38,11 +40,12 @@ all: libcadical.a cadical mobical
 # Application binaries (the stand alone solver 'cadical' and the model based
 # tester 'mobical') and the library are the main build targets.
 
-cadical: cadical.o libcadical.a makefile
-	$(COMPILE) -o $@ $< -L. libcadical.a
+cadical: cadical.o libcadical.a makefile $(LIBS)
+	$(COMPILE) -o $@ $< -L. libcadical.a $(LIBS)
 
-mobical: mobical.o libcadical.a makefile
-	$(COMPILE) -o $@ $< -L. libcadical.a
+mobical: mobical.o libcadical.a makefile $(LIBS)
+	$(COMPILE) -o $@ $< -L. libcadical.a $(LIBS)
+
 
 libcadical.a: $(OBJ) makefile
 	ar rc $@ $(OBJ)
