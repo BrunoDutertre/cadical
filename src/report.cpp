@@ -87,15 +87,15 @@ Report::Report (const char * h, int precision, int min, double value)
   header (h)
 {
   char fmt[32];
-  if (precision < 0) sprintf (fmt, "%%.%df", -precision - 1);
-  else sprintf (fmt, "%%.%df", precision);
-  sprintf (buffer, fmt, value);
+  if (precision < 0) snprintf (fmt, 32, "%%.%df", -precision - 1);
+  else snprintf (fmt, 32, "%%.%df", precision);
+  snprintf (buffer, 20, fmt, value);
   const int width = strlen (buffer);
   if (precision < 0) strcat (buffer, "%");
   if (width >= min) return;
-  if (precision < 0) sprintf (fmt, "%%%d.%df%%%%", min, -precision - 1);
-  else sprintf (fmt, "%%%d.%df", min, precision);
-  sprintf (buffer, fmt, value);
+  if (precision < 0) snprintf (fmt, 32, "%%%d.%df%%%%", min, -precision - 1);
+  else snprintf (fmt, 32, "%%%d.%df", min, precision);
+  snprintf (buffer, 20, fmt, value);
 }
 
 /*------------------------------------------------------------------------*/

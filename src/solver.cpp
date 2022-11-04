@@ -172,14 +172,14 @@ log_api_call_returns (Internal * internal, const char * name, bool res) {
 static void
 log_api_call_returns (Internal * internal, const char * name, int res) {
   char fmt[32];
-  sprintf (fmt, "returns '%d'", res);
+  snprintf (fmt, 32, "returns '%d'", res);
   log_api_call (internal, name, fmt);
 }
 
 static void
 log_api_call_returns (Internal * internal, const char * name, int64_t res) {
-  char fmt[32];
-  sprintf (fmt, "returns '%" PRId64 "'", res);
+  char fmt[50];
+  snprintf (fmt, 50, "returns '%" PRId64 "'", res);
   log_api_call (internal, name, fmt);
 }
 
@@ -187,7 +187,7 @@ static void
 log_api_call_returns (Internal * internal,
                       const char * name, int lit, int res) {
   char fmt[32];
-  sprintf (fmt, "returns '%d'", res);
+  snprintf (fmt, 32, "returns '%d'", res);
   log_api_call (internal, name, lit, fmt);
 }
 
