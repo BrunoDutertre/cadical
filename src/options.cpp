@@ -191,7 +191,7 @@ void Options::print () {
   if (N != (V)) different++; \
   if (verbose || N != (V)) { \
     if ((L) == 0 && (H) == 1) { \
-      sprintf (buffer, "--" #N "=%s", (N ? "true" : "false")); \
+      snprintf (buffer, 160, "--" #N "=%s", (N ? "true" : "false"));	\
       MSG ("  %s%-30s%s (%s default %s'%s'%s)", \
         ((N == (V)) ? "" : tout.bright_yellow_code ()), \
         buffer, \
@@ -201,7 +201,7 @@ void Options::print () {
         (bool)(V) ? "true" : "false", \
         tout.normal_code ()); \
     } else { \
-      sprintf (buffer, "--" #N "=%d", N); \
+      snprintf (buffer, 160, "--" #N "=%d", N);	    \
       MSG ("  %s%-30s%s (%s default %s'" #V "'%s)", \
         ((N == (V)) ? "" : tout.bright_yellow_code ()), \
         buffer, \
