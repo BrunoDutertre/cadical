@@ -129,7 +129,7 @@ char * File::find (const char * prg) {
     *q++ = 0;
     size_t pathlen = (q - p) + prglen;
     char * path = new char [pathlen + 1];
-    snprintf (path, pathlen, "%s/%s", p, prg);
+    snprintf (path, pathlen+1, "%s/%s", p, prg);
     assert (strlen (path) == pathlen);
     if (exists (path)) res = path;
     else delete [] path;
