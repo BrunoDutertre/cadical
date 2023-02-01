@@ -60,6 +60,10 @@ class Checker : public Observer {
   // thus we use an array which can also be indexed by negative literals and
   // is actually valid in the range [-size_vars+1, ..., size_vars-1].
   //
+  // BD: To achieve this, we allocate base_vals of size 2*size_vars
+  // and we set val = base_vals + size_vars.
+  //
+  signed char * base_vals;
   signed char * vals;
 
   // The 'watchers' and 'marks' data structures are not that time critical

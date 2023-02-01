@@ -21,6 +21,7 @@ Internal::Internal ()
   vsize (0),
   max_var (0),
   level (0),
+  base_vals (0),
   vals (0),
   score_inc (1.0),
   scores (this),
@@ -58,7 +59,7 @@ Internal::~Internal () {
   if (proof) delete proof;
   if (tracer) delete tracer;
   if (checker) delete checker;
-  if (vals) { vals -= vsize; delete [] vals; }
+  if (base_vals) delete [] base_vals;
 }
 
 /*------------------------------------------------------------------------*/
@@ -79,19 +80,25 @@ Internal::~Internal () {
 // by static analyzers though.  Clang with '--analyze' thought that this
 // idiom would generate a memory leak thus we use the following dummy.
 
-static signed char * ignore_clang_analyze_memory_leak_warning;
-
+//
+// BD: this was buggy because (vals, vsisze) were not updated atomically,
+// which could cause the destructor to be called with an invalid vsize and
+// cause an invalid free.
+//
 void Internal::enlarge_vals (size_t new_vsize) {
+  signed char * new_base_vals;
   signed char * new_vals;
   const size_t bytes = 2u * new_vsize;
-  new_vals = new signed char [ bytes ]; // g++-4.8 does not like ... { 0 };
-  memset (new_vals, 0, bytes);
-  ignore_clang_analyze_memory_leak_warning = new_vals;
-  new_vals += new_vsize;
+  new_base_vals = new signed char [ bytes ]; // g++-4.8 does not like ... { 0 };
+  memset (new_base_vals, 0, bytes);
 
-  if (vals) memcpy (new_vals - max_var, vals - max_var, 2u*max_var + 1u);
-  vals -= vsize;
-  delete [] vals;
+  new_vals = new_base_vals + new_vsize;
+
+  if (base_vals) {
+    memcpy (new_vals - max_var, vals - max_var, 2u*max_var + 1u);
+    delete [] base_vals;
+  }
+  base_vals = new_base_vals;
   vals = new_vals;
 }
 
