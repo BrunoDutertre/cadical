@@ -16,30 +16,35 @@ class Observer;
 
 class Proof {
 
-  Internal * internal;
+  Internal *internal;
 
   vector<int> clause;           // of external literals
   vector<Observer *> observers; // owned, so deleted in destructor
 
-  void add_literal (int internal_lit);  // add to 'clause'
-  void add_literals (Clause *);         // add to 'clause'
+  void add_literal (int internal_lit); // add to 'clause'
+  void add_literals (Clause *);        // add to 'clause'
 
-  void add_literals (const vector<int> &);      // ditto
+  void add_literals (const vector<int> &); // ditto
 
-  void add_original_clause ();  // notify observers of original clauses
-  void add_derived_clause ();   // notify observers of derived clauses
-  void delete_clause ();        // notify observers of deleted clauses
+  void add_original_clause (); // notify observers of original clauses
+  void add_derived_clause ();  // notify observers of derived clauses
+  void delete_clause ();       // notify observers of deleted clauses
 
 public:
-
   Proof (Internal *);
   ~Proof ();
 
-  void connect (Observer * v) { observers.push_back (v); }
+  void connect (Observer *v) { observers.push_back (v); }
 
   // Add original clauses to the proof (for online proof checking).
   //
   void add_original_clause (const vector<int> &);
+
+  // Add/delete original clauses to/from the proof using their original
+  //  external literals (from external->eclause)
+  //
+  void add_external_original_clause (const vector<int> &);
+  void delete_external_original_clause (const vector<int> &);
 
   // Add derived (such as learned) clauses to the proof.
   //
@@ -59,6 +64,6 @@ public:
   void flush ();
 };
 
-}
+} // namespace CaDiCaL
 
 #endif

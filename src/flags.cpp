@@ -3,7 +3,15 @@
 namespace CaDiCaL {
 
 void Internal::mark_fixed (int lit) {
-  Flags & f = flags (lit);
+  if (external_prop && !external_prop_is_lazy && observed (lit)) {
+    int elit = externalize (lit);
+    assert (elit && external->observed (elit));
+
+    external->propagator->notify_assignment (elit, true);
+    // Does not increase the notified counter because
+    // it is a separated way of notification.
+  }
+  Flags &f = flags (lit);
   assert (f.status == Flags::ACTIVE);
   f.status = Flags::FIXED;
   LOG ("fixed %d", abs (lit));
@@ -17,7 +25,7 @@ void Internal::mark_fixed (int lit) {
 }
 
 void Internal::mark_eliminated (int lit) {
-  Flags & f = flags (lit);
+  Flags &f = flags (lit);
   assert (f.status == Flags::ACTIVE);
   f.status = Flags::ELIMINATED;
   LOG ("eliminated %d", abs (lit));
@@ -31,7 +39,7 @@ void Internal::mark_eliminated (int lit) {
 }
 
 void Internal::mark_pure (int lit) {
-  Flags & f = flags (lit);
+  Flags &f = flags (lit);
   assert (f.status == Flags::ACTIVE);
   f.status = Flags::PURE;
   LOG ("pure %d", abs (lit));
@@ -45,7 +53,7 @@ void Internal::mark_pure (int lit) {
 }
 
 void Internal::mark_substituted (int lit) {
-  Flags & f = flags (lit);
+  Flags &f = flags (lit);
   assert (f.status == Flags::ACTIVE);
   f.status = Flags::SUBSTITUTED;
   LOG ("substituted %d", abs (lit));
@@ -59,7 +67,7 @@ void Internal::mark_substituted (int lit) {
 }
 
 void Internal::mark_active (int lit) {
-  Flags & f = flags (lit);
+  Flags &f = flags (lit);
   assert (f.status == Flags::UNUSED);
   f.status = Flags::ACTIVE;
   LOG ("activate %d previously unused", abs (lit));
@@ -73,36 +81,36 @@ void Internal::mark_active (int lit) {
 
 void Internal::reactivate (int lit) {
   assert (!active (lit));
-  Flags & f = flags (lit);
+  Flags &f = flags (lit);
   assert (f.status != Flags::FIXED);
   assert (f.status != Flags::UNUSED);
 #ifdef LOGGING
-  const char * msg = 0;
+  const char *msg = 0;
 #endif
   switch (f.status) {
-    default:
-    case Flags::ELIMINATED:
-      assert (f.status == Flags::ELIMINATED);
-      assert (stats.now.eliminated > 0);
-      stats.now.eliminated--;
+  default:
+  case Flags::ELIMINATED:
+    assert (f.status == Flags::ELIMINATED);
+    assert (stats.now.eliminated > 0);
+    stats.now.eliminated--;
 #ifdef LOGGING
-      msg = "eliminated";
+    msg = "eliminated";
 #endif
-      break;
-    case Flags::SUBSTITUTED:
+    break;
+  case Flags::SUBSTITUTED:
 #ifdef LOGGING
-      msg = "substituted";
+    msg = "substituted";
 #endif
-      assert (stats.now.substituted > 0);
-      stats.now.substituted--;
-      break;
-    case Flags::PURE:
+    assert (stats.now.substituted > 0);
+    stats.now.substituted--;
+    break;
+  case Flags::PURE:
 #ifdef LOGGING
-      msg = "pure literal";
+    msg = "pure literal";
 #endif
-      assert (stats.now.pure > 0);
-      stats.now.pure--;
-      break;
+    assert (stats.now.pure > 0);
+    stats.now.pure--;
+    break;
   }
 #ifdef LOGGING
   assert (msg);
@@ -116,4 +124,4 @@ void Internal::reactivate (int lit) {
   stats.active++;
 }
 
-}
+} // namespace CaDiCaL

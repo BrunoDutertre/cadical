@@ -52,17 +52,18 @@ struct External {
 
   /*==== start of state ==================================================*/
 
-  Internal * internal;        // The actual internal solver.
+  Internal *internal; // The actual internal solver.
 
-  int max_var;                // External maximum variable index.
-  size_t vsize;               // Allocated external size.
+  int max_var;  // External maximum variable index.
+  size_t vsize; // Allocated external size.
 
-  vector<bool> vals;          // Current external (extended) assignment.
-  vector<int> e2i;            // External 'idx' to internal 'lit'.
+  vector<bool> vals; // Current external (extended) assignment.
+  vector<int> e2i;   // External 'idx' to internal 'lit'.
 
-  vector<int> assumptions;    // External assumptions.
-  vector<int> constraint;     // External constraint. Terminated by zero.
+  vector<int> assumptions; // External assumptions.
+  vector<int> constraint;  // External constraint. Terminated by zero.
 
+  vector<int> eclause; // External version of original input clause.
   // The extension stack for reconstructing complete satisfying assignments
   // (models) of the original external formula is kept in this external
   // solver object. It keeps track of blocked clauses and clauses containing
@@ -70,31 +71,45 @@ struct External {
   // external literals on the 'extension' stack after mapping the
   // internal literals given as arguments with 'externalize'.
 
-  bool extended;              // Have been extended.
-  vector<int> extension;      // Solution reconstruction extension stack.
+  bool extended;         // Have been extended.
+  vector<int> extension; // Solution reconstruction extension stack.
 
-  vector<bool> witness;       // Literal witness on extension stack.
-  vector<bool> tainted;       // Literal tainted in adding literals.
+  vector<bool> witness; // Literal witness on extension stack.
+  vector<bool> tainted; // Literal tainted in adding literals.
 
   vector<unsigned> frozentab; // Reference counts for frozen variables.
 
   // Regularly checked terminator if non-zero.  The terminator is set from
   // 'Solver::set (Terminator *)' and checked by 'Internal::terminating ()'.
 
-  Terminator * terminator;
+  Terminator *terminator;
 
   // If there is a learner export learned clauses.
 
-  Learner * learner;
+  Learner *learner;
 
   void export_learned_empty_clause ();
   void export_learned_unit_clause (int ilit);
   void export_learned_large_clause (const vector<int> &);
 
+  // If there is an external propagator.
+
+  ExternalPropagator *propagator;
+
+  vector<bool> is_observed; // Quick flag for each external variable
+
+  void add_observed_var (int elit);
+  void remove_observed_var (int elit);
+  void reset_observed_vars ();
+
+  bool observed (int elit);
+  bool is_witness (int elit);
+  bool is_decision (int elit);
+
   //----------------------------------------------------------------------//
 
-  signed char * solution;     // Given solution checking for debugging.
-  vector<int> original;       // Saved original formula for checking.
+  signed char *solution; // Given solution checking for debugging.
+  vector<int> original;  // Saved original formula for checking.
 
   // If 'opts.checkfrozen' is set make sure that only literals are added
   // which were never completely molten before.  These molten literals are
@@ -106,7 +121,7 @@ struct External {
 
   //----------------------------------------------------------------------//
 
-  const Range vars;           // Provides safe variable iterations.
+  const Range vars; // Provides safe variable iterations.
 
   /*==== end of state ====================================================*/
 
@@ -161,35 +176,35 @@ struct External {
     assert (elit != INT_MIN);
     const int idx = abs (elit) - 1;
     assert (idx <= max_var);
-    return 2u*idx + (elit < 0);
+    return 2u * idx + (elit < 0);
   }
 
-  bool marked (const vector<bool> & map, int elit) const {
+  bool marked (const vector<bool> &map, int elit) const {
     const unsigned ulit = elit2ulit (elit);
     return ulit < map.size () ? map[ulit] : false;
   }
 
-  void mark (vector<bool> & map, int elit) {
+  void mark (vector<bool> &map, int elit) {
     const unsigned ulit = elit2ulit (elit);
     if (ulit >= map.size ())
       map.resize (ulit + 1, false);
     map[ulit] = true;
   }
 
-  void unmark (vector<bool> & map, int elit) {
+  void unmark (vector<bool> &map, int elit) {
     const unsigned ulit = elit2ulit (elit);
-    if (ulit < map.size ()) map[ulit] = false;
+    if (ulit < map.size ())
+      map[ulit] = false;
   }
 
   /*----------------------------------------------------------------------*/
 
   void push_external_clause_and_witness_on_extension_stack (
-    const vector<int> & clause, const vector<int> & witness);
+      const vector<int> &clause, const vector<int> &witness);
 
   // Restore a clause, which was pushed on the extension stack.
-  void restore_clause (
-    const vector<int>::const_iterator & begin,
-    const vector<int>::const_iterator & end);
+  void restore_clause (const vector<int>::const_iterator &begin,
+                       const vector<int>::const_iterator &end);
 
   void restore_clauses ();
 
@@ -206,8 +221,10 @@ struct External {
     assert (elit);
     assert (elit != INT_MIN);
     int eidx = abs (elit);
-    if (eidx > max_var) return false;
-    if (eidx >= (int) frozentab.size ()) return false;
+    if (eidx > max_var)
+      return false;
+    if (eidx >= (int) frozentab.size ())
+      return false;
     return frozentab[eidx] > 0;
   }
 
@@ -216,10 +233,10 @@ struct External {
   External (Internal *);
   ~External ();
 
-  void enlarge (int new_max_var);       // Enlarge allocated 'vsize'.
-  void init (int new_max_var);          // Initialize up-to 'new_max_var'.
+  void enlarge (int new_max_var); // Enlarge allocated 'vsize'.
+  void init (int new_max_var);    // Initialize up-to 'new_max_var'.
 
-  int internalize (int);        // Translate external to internal literal.
+  int internalize (int); // Translate external to internal literal.
 
   /*----------------------------------------------------------------------*/
 
@@ -262,12 +279,19 @@ struct External {
   inline int ival (int elit) const {
     assert (elit != INT_MIN);
     int eidx = abs (elit), res;
-    if (eidx > max_var) res = -1;
-    else if ((size_t) eidx >= vals.size ()) res = -1;
-    else res = vals[eidx] ? eidx : -eidx;
-    if (elit < 0) res = -res;
+    if (eidx > max_var)
+      res = -eidx;
+    else if ((size_t) eidx >= vals.size ())
+      res = -eidx;
+    else
+      res = vals[eidx] ? eidx : -eidx;
+    if (elit < 0)
+      res = -res;
     return res;
   }
+
+  bool flip (int elit);
+  bool flippable (int elit);
 
   bool failed (int elit);
 
@@ -293,10 +317,10 @@ struct External {
 
   /*----------------------------------------------------------------------*/
 
-  int lookahead();
-  CaDiCaL::CubesWithStatus generate_cubes(int, int);
+  int lookahead ();
+  CaDiCaL::CubesWithStatus generate_cubes (int, int);
 
-  int fixed (int elit) const;   // Implemented in 'internal.hpp'.
+  int fixed (int elit) const; // Implemented in 'internal.hpp'.
 
   /*----------------------------------------------------------------------*/
 
@@ -317,7 +341,7 @@ struct External {
 
   // Copy flags for determining preprocessing state.
 
-  void copy_flags (External & other) const;
+  void copy_flags (External &other) const;
 
   /*----------------------------------------------------------------------*/
 
@@ -333,19 +357,23 @@ struct External {
   void check_no_solution_after_learning_empty_clause ();
 
   void check_learned_empty_clause () {
-    if (solution) check_no_solution_after_learning_empty_clause ();
+    if (solution)
+      check_no_solution_after_learning_empty_clause ();
   }
 
   void check_learned_unit_clause (int unit) {
-    if (solution) check_solution_on_learned_unit_clause (unit);
+    if (solution)
+      check_solution_on_learned_unit_clause (unit);
   }
 
   void check_learned_clause () {
-    if (solution) check_solution_on_learned_clause ();
+    if (solution)
+      check_solution_on_learned_clause ();
   }
 
-  void check_shrunken_clause (Clause * c) {
-    if (solution) check_solution_on_shrunken_clause (c);
+  void check_shrunken_clause (Clause *c) {
+    if (solution)
+      check_solution_on_shrunken_clause (c);
   }
 
   void check_assignment (int (External::*assignment) (int) const);
@@ -365,13 +393,15 @@ struct External {
     assert (solution);
     assert (elit != INT_MIN);
     int eidx = abs (elit);
-    if (eidx > max_var) return 0;
+    if (eidx > max_var)
+      return 0;
     int res = solution[eidx];
-    if (elit < 0) res = -res;
+    if (elit < 0)
+      res = -res;
     return res;
   }
 };
 
-}
+} // namespace CaDiCaL
 
 #endif
