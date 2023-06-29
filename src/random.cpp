@@ -103,21 +103,25 @@ static uint64_t hash_network_addresses () {
   struct ifaddrs * addrs;
   if (!getifaddrs (&addrs)) {
     for (struct ifaddrs * addr = addrs; addr; addr = addr->ifa_next) {
-      const int family = addr->ifa_addr->sa_family;
-      if (family == AF_INET || family == AF_INET6) {
-        const int size = (family == AF_INET) ?
-          sizeof (struct sockaddr_in) : sizeof (struct sockaddr_in6);
-        char buffer[128];
-        if (!getnameinfo (addr->ifa_addr, size, buffer, sizeof buffer,
-                          0, 0, NI_NUMERICHOST)) {
-          uint64_t tmp = hash_string (buffer);
+      // check that ifa_addr is not null
+      // https://stackoverflow.com/questions/22767155/when-will-if
+      if (addr->ifa_addr != nullptr) {
+	const int family = addr->ifa_addr->sa_family;
+	if (family == AF_INET || family == AF_INET6) {
+	  const int size = (family == AF_INET) ?
+	    sizeof (struct sockaddr_in) : sizeof (struct sockaddr_in6);
+	  char buffer[128];
+	  if (!getnameinfo (addr->ifa_addr, size, buffer, sizeof buffer,
+			    0, 0, NI_NUMERICHOST)) {
+	    uint64_t tmp = hash_string (buffer);
 #ifdef DO_PRINT_HASH
-          printf ("c PRINT_HASH %35s = %020" PRIu64 "\n", buffer, tmp);
-          fflush (stdout);
+	    printf ("c PRINT_HASH %35s = %020" PRIu64 "\n", buffer, tmp);
+	    fflush (stdout);
 #endif
-          res ^= tmp;
-          res *= 10000000000000000051ul;
-        }
+	    res ^= tmp;
+	    res *= 10000000000000000051ul;
+	  }
+	}
       }
     }
     freeifaddrs (addrs);
