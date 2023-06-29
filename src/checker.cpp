@@ -79,7 +79,7 @@ void Checker::delete_clause (CheckerClause *c) {
     assert (num_garbage);
     num_garbage--;
   }
-  delete[](char *) c;
+  delete[] (char *) c;
 }
 
 void Checker::enlarge_clauses () {
@@ -168,9 +168,10 @@ void Checker::collect_garbage_clauses () {
 /*------------------------------------------------------------------------*/
 
 Checker::Checker (Internal *i)
-    : internal (i), size_vars (0), base_vals (0), vals (0), inconsistent (false),
-      num_clauses (0), num_garbage (0), size_clauses (0), clauses (0),
-      garbage (0), next_to_propagate (0), last_hash (0) {
+    : internal (i), size_vars (0), base_vals (0), vals (0),
+      inconsistent (false), num_clauses (0), num_garbage (0),
+      size_clauses (0), clauses (0), garbage (0), next_to_propagate (0),
+      last_hash (0) {
   LOG ("CHECKER new");
 
   // Initialize random number table for hash function.
@@ -216,15 +217,15 @@ void Checker::enlarge_vars (int64_t idx) {
        "",
        size_vars, new_size_vars);
 
-  signed char * new_base_vals;
-  signed char * new_vals;
-  new_base_vals = new signed char [ 2*new_size_vars ];
-  clear_n (new_base_vals, 2*new_size_vars);
+  signed char *new_base_vals;
+  signed char *new_vals;
+  new_base_vals = new signed char[2 * new_size_vars];
+  clear_n (new_base_vals, 2 * new_size_vars);
   new_vals = new_base_vals + new_size_vars;
   if (size_vars) // To make sanitizer happy (without '-O').
-    memcpy ((void*) (new_vals - size_vars),
-            (void*) (vals - size_vars), 2*size_vars);
-  delete [] base_vals;
+    memcpy ((void *) (new_vals - size_vars), (void *) (vals - size_vars),
+            2 * size_vars);
+  delete[] base_vals;
   base_vals = new_base_vals;
   vals = new_vals;
 

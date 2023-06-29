@@ -11,8 +11,8 @@ Internal::Internal ()
       protected_reasons (false), force_saved_phase (false),
       searching_lucky_phases (false), stable (false), reported (false),
       external_prop (false), external_prop_is_lazy (true), rephased (0),
-      vsize (0), max_var (0), level (0), base_vals (0), vals (0), score_inc (1.0),
-      scores (this), conflict (0), ignore (0),
+      vsize (0), max_var (0), level (0), base_vals (0), vals (0),
+      score_inc (1.0), scores (this), conflict (0), ignore (0),
       external_reason (&external_reason_clause), notified (0),
       propagated (0), propagated2 (0), propergated (0), best_assigned (0),
       target_assigned (0), no_conflict_until (0), unsat_constraint (false),
@@ -64,17 +64,18 @@ Internal::~Internal () {
 // cause an invalid free.
 //
 void Internal::enlarge_vals (size_t new_vsize) {
-  signed char * new_base_vals;
-  signed char * new_vals;
+  signed char *new_base_vals;
+  signed char *new_vals;
   const size_t bytes = 2u * new_vsize;
-  new_base_vals = new signed char [ bytes ]; // g++-4.8 does not like ... { 0 };
+  new_base_vals =
+      new signed char[bytes]; // g++-4.8 does not like ... { 0 };
   memset (new_base_vals, 0, bytes);
 
   new_vals = new_base_vals + new_vsize;
 
   if (base_vals) {
-    memcpy (new_vals - max_var, vals - max_var, 2u*max_var + 1u);
-    delete [] base_vals;
+    memcpy (new_vals - max_var, vals - max_var, 2u * max_var + 1u);
+    delete[] base_vals;
   }
   base_vals = new_base_vals;
   vals = new_vals;

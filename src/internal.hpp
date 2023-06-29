@@ -166,11 +166,11 @@ struct Internal {
   int max_var;                // internal maximum variable index
   int level;                  // decision level ('control.size () - 1')
   Phases phases;              // saved, target and best phases
-  signed char * base_vals;    // allocated array: we have vals = base_vals + vsize
+  signed char *base_vals;     // allocated array: we have vals = base_vals + vsize
   signed char *vals;          // assignment [-max_var,max_var]
-  vector<signed char> marks;  // signed marks [1,max_var]
-  vector<unsigned> frozentab; // frozen counters [1,max_var]
-  vector<int> i2e;            // maps internal 'idx' to external 'lit'
+  vector<signed char> marks;    // signed marks [1,max_var]
+  vector<unsigned> frozentab;   // frozen counters [1,max_var]
+  vector<int> i2e;              // maps internal 'idx' to external 'lit'
   vector<unsigned> relevanttab; // Reference counts for observed variables.
   Queue queue;                  // variable move to front decision queue
   Links links;                  // table of links for decision queue

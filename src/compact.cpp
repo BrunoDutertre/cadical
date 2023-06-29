@@ -348,14 +348,14 @@ void Internal::compact () {
   // Special case for 'val' as for 'val' we trade branch less code for
   // memory and always allocated an [-maxvar,...,maxvar] array.
   {
-    signed char * new_base_vals = new signed char [ 2*mapper.new_vsize ];
-    signed char * new_vals = new_base_vals + mapper.new_vsize;
+    signed char *new_base_vals = new signed char[2 * mapper.new_vsize];
+    signed char *new_vals = new_base_vals + mapper.new_vsize;
     for (auto src : vars)
       new_vals[-mapper.map_idx (src)] = vals[-src];
     for (auto src : vars)
       new_vals[mapper.map_idx (src)] = vals[src];
     new_vals[0] = 0;
-    delete [] base_vals;
+    delete[] base_vals;
     base_vals = new_base_vals;
     vals = new_vals;
   }

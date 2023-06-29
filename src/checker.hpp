@@ -62,8 +62,8 @@ class Checker : public Observer {
   // BD: To achieve this, we allocate base_vals of size 2*size_vars
   // and we set val = base_vals + size_vars.
   //
-  signed char * base_vals;
-  signed char * vals;
+  signed char *base_vals;
+  signed char *vals;
 
   // The 'watchers' and 'marks' data structures are not that time critical
   // and thus we access them by first mapping a literal to 'unsigned'.
