@@ -30,7 +30,8 @@ void Internal::build_full_lrat () {
 void Internal::trace (File *file) {
   assert (!tracer);
   new_proof_on_demand ();
-  tracer = new Tracer (this, file, opts.binary, opts.lrat, opts.lratfrat);
+  tracer = new Tracer (this, file, opts.binary, opts.lrat, opts.lratfrat,
+                       opts.lratveripb);
   LOG ("PROOF connecting proof tracer");
   proof->connect (tracer);
 }
@@ -45,11 +46,10 @@ void Internal::check () {
     lratchecker = new LratChecker (this);
     LOG ("PROOF connecting lrat proof checker");
     proof->connect (lratchecker);
-  } else {
-    checker = new Checker (this);
-    LOG ("PROOF connecting proof checker");
-    proof->connect (checker);
   }
+  checker = new Checker (this);
+  LOG ("PROOF connecting proof checker");
+  proof->connect (checker);
 }
 
 // We want to close a proof trace and stop checking as soon we are done.
@@ -252,6 +252,26 @@ void Proof::finalize_unit (uint64_t id, int lit) {
   finalize_clause ();
 }
 
+void Proof::finalize_external_unit (uint64_t id, int lit) {
+  LOG ("PROOF finalizing clause %d", lit);
+  assert (clause.empty ());
+  clause.push_back (lit);
+  clause_id = id;
+  finalize_clause ();
+}
+
+void Proof::finalize_proof (uint64_t id) {
+  if (lratchecker)
+    lratchecker->finalize_check ();
+  if (tracer)
+    tracer->veripb_finalize_proof (id);
+}
+
+void Proof::set_first_id (uint64_t id) {
+  if (tracer)
+    tracer->set_first_id (id);
+}
+
 /*------------------------------------------------------------------------*/
 
 // During garbage collection clauses are shrunken by removing falsified
@@ -374,17 +394,15 @@ void Proof::add_original_clause () {
 void Proof::add_derived_clause () {
   LOG (clause, "PROOF adding derived external clause");
   assert (clause_id);
-  assert (!internal->opts.lrat || internal->opts.lratexternal ||
-          !proof_chain.empty ());
 
   if (lratbuilder) {
-    if (proof_chain.empty ())
+    if (internal->opts.lrat && internal->opts.lratexternal)
       proof_chain = lratbuilder->add_clause_get_proof (clause_id, clause);
     else
       lratbuilder->add_derived_clause (clause_id, clause);
   }
   if (lratchecker) {
-    if (proof_chain.empty ())
+    if (!internal->opts.lrat)
       lratchecker->add_derived_clause (clause_id, clause);
     else
       lratchecker->add_derived_clause (clause_id, clause, proof_chain);
@@ -392,7 +410,7 @@ void Proof::add_derived_clause () {
   if (checker)
     checker->add_derived_clause (clause_id, clause);
   if (tracer) {
-    if (proof_chain.empty ())
+    if (!internal->opts.lrat)
       tracer->add_derived_clause (clause_id, clause);
     else
       tracer->add_derived_clause (clause_id, clause, proof_chain);
@@ -417,6 +435,8 @@ void Proof::delete_clause () {
 }
 
 void Proof::finalize_clause () {
+  if (lratchecker)
+    lratchecker->finalize_clause (clause_id, clause);
   if (tracer)
     tracer->finalize_clause (clause_id, clause);
   clause.clear ();

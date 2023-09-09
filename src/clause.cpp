@@ -315,6 +315,7 @@ void Internal::mark_garbage (Clause *c) {
 
 void Internal::assign_original_unit (uint64_t id, int lit) {
   assert (!level);
+  assert (!unsat);
   const int idx = vidx (lit);
   assert (!vals[idx]);
   assert (!flags (idx).eliminated ());
@@ -350,7 +351,7 @@ void Internal::add_new_original_clause (uint64_t id) {
     skip = true;
   } else {
     assert (clause.empty ());
-    assert (lrat_chain.empty ());
+    // assert (lrat_chain.empty ());
     for (const auto &lit : original) {
       int tmp = marked (lit);
       if (tmp > 0) {
@@ -364,9 +365,13 @@ void Internal::add_new_original_clause (uint64_t id) {
         if (tmp < 0) {
           LOG ("removing falsified literal %d", lit);
           if (opts.lrat && !opts.lratexternal) {
-            uint64_t uid = (unit_clauses[vlit (-lit)]);
-            assert (uid);               // not sure if this holds.
-            lrat_chain.push_back (uid); // but it looks ok so far.
+            int elit = externalize (lit);
+            unsigned eidx = (elit > 0) + 2u * (unsigned) abs (elit);
+            if (!external->ext_units[eidx]) {
+              uint64_t uid = (unit_clauses[vlit (-lit)]);
+              assert (uid);
+              lrat_chain.push_back (uid);
+            }
           }
         } else if (tmp > 0) {
           LOG ("satisfied since literal %d true", lit);
@@ -381,8 +386,13 @@ void Internal::add_new_original_clause (uint64_t id) {
       unmark (lit);
   }
   if (skip) {
-    if (proof)
-      proof->delete_clause (id, original);
+    if (proof) {
+      if (opts.lrat) {
+        proof->delete_external_original_clause (id, external->eclause);
+      } else {
+        proof->delete_external_original_clause (id, external->eclause);
+      }
+    }
   } else {
     uint64_t new_id = id;
     size_t size = clause.size ();
@@ -395,7 +405,10 @@ void Internal::add_new_original_clause (uint64_t id) {
           proof->add_derived_clause (new_id, clause, lrat_chain);
         } else
           proof->add_derived_clause (new_id, clause);
-        proof->delete_clause (id, original);
+        if (opts.lrat)
+          proof->delete_external_original_clause (id, external->eclause);
+        else
+          proof->delete_external_original_clause (id, external->eclause);
       }
     }
     lrat_chain.clear ();

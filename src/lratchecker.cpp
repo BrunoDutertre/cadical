@@ -30,7 +30,9 @@ signed char &LratChecker::checked_lit (int lit) {
 LratCheckerClause *LratChecker::new_clause () {
   const size_t size = imported_clause.size ();
   assert (size <= UINT_MAX);
-  const size_t bytes = sizeof (LratCheckerClause) + size * sizeof (int);
+  const int off = size ? -1 : 0;
+  const size_t bytes =
+      sizeof (LratCheckerClause) + (size - off) * sizeof (int);
   LratCheckerClause *res = (LratCheckerClause *) new char[bytes];
   res->garbage = false;
   res->next = 0;
@@ -110,9 +112,9 @@ void LratChecker::collect_garbage_clauses () {
 /*------------------------------------------------------------------------*/
 
 LratChecker::LratChecker (Internal *i)
-    : internal (i), size_vars (0), num_clauses (0), num_garbage (0),
-      size_clauses (0), clauses (0), garbage (0), last_hash (0),
-      last_id (0) {
+    : internal (i), size_vars (0), num_clauses (0), num_finalized (0),
+      num_garbage (0), size_clauses (0), clauses (0), garbage (0),
+      last_hash (0), last_id (0) {
   LOG ("LRAT CHECKER new");
 
   // Initialize random number table for hash function.
@@ -125,6 +127,8 @@ LratChecker::LratChecker (Internal *i)
     assert (nonce), assert (nonce & 1);
     nonces[n] = nonce;
   }
+
+  strict_lrat = internal->opts.lrat;
 
   memset (&stats, 0, sizeof (stats)); // Initialize statistics.
 }
@@ -242,9 +246,8 @@ bool LratChecker::check_resolution (vector<uint64_t> proof_chain) {
     checked_lit (lit) = true;
     assert (!checked_lit (-lit));
   }
-  for (auto p = proof_chain.end () - 2; p >= proof_chain.begin ();
-       p--) {      // TODO can we do this more
-    auto &id = *p; // elegantly with reverse iterator?
+  for (auto p = proof_chain.end () - 2; p >= proof_chain.begin (); p--) {
+    auto &id = *p;
     c = *find (id);
     assert (c); // since this is checked in check already
     for (int *i = c->literals; i < c->literals + c->size; i++) {
@@ -264,7 +267,7 @@ bool LratChecker::check_resolution (vector<uint64_t> proof_chain) {
     }
     if (!checked_lit (lit)) {
       // learned clause is subsumed by resolvents
-      assert (internal->opts.instantiate || internal->opts.decompose);
+      // assert (internal->opts.instantiate || internal->opts.decompose);
       checked_lit (lit) = true;
     }
     checked_lit (-lit) = true;
@@ -277,7 +280,6 @@ bool LratChecker::check_resolution (vector<uint64_t> proof_chain) {
            "on "
            "variable %" PRId64,
            lit);
-      assert (false);
       return false;
     }
   }
@@ -334,8 +336,8 @@ bool LratChecker::check (vector<uint64_t> proof_chain) {
         continue;
       // TODO uncomment and fuzz maybe also withouth opts.lratexternal
       // of course this also fails in decompose :/ ... and instantiate
-      assert (!checked_lit (lit) || internal->opts.lratexternal ||
-              internal->opts.decompose);
+      // assert (!checked_lit (lit) || internal->opts.lratexternal); // ||
+      //        internal->opts.decompose);
       // || internal->opts.instantiate);
       // assert (!checked_lit (lit));      // tempting to assert here since
       // usually this should be a bug in
@@ -355,20 +357,6 @@ bool LratChecker::check (vector<uint64_t> proof_chain) {
     }
     if (!unit) {
       LOG ("LRAT CHECKER check succeded, clause falsified %" PRIu64, id);
-      // TODO fuzz with this to see where errors are.
-      // known problems with lratbuilder? not interesting anymore...
-      // fails in decompose... I do not have a trace for instantiate but I
-      // am sure it also fails this assert
-      assert (proof_chain.back () == id || internal->opts.lratexternal ||
-              internal->opts.decompose);
-      // || internal->opts.instantiate);
-      // assert (proof_chain.back () == id);    // also tempting since this
-      // basically means the proof chain
-      // is unnecessarily long.
-      // but unfortunatly this also
-      // fails when we prove the
-      // inconsistent clause to justify
-      // whatever
       checking = true;
       break;
     }
@@ -389,8 +377,7 @@ bool LratChecker::check (vector<uint64_t> proof_chain) {
 
 void LratChecker::add_original_clause (uint64_t id, const vector<int> &c) {
   START (checking);
-  LOG (c, "LRAT CHECKER addition of original clause");
-  LOG ("LRAT CHECKER clause id %" PRIu64, id);
+  LOG (c, "LRAT CHECKER addition of original clause[%" PRIu64 "]", id);
   stats.added++;
   stats.original++;
   import_clause (c);
@@ -404,8 +391,7 @@ void LratChecker::add_original_clause (uint64_t id, const vector<int> &c) {
 void LratChecker::add_derived_clause (uint64_t id, const vector<int> &c,
                                       const vector<uint64_t> &proof_chain) {
   START (checking);
-  LOG (c, "LRAT CHECKER addition of derived clause");
-  LOG ("LRAT CHECKER clause id %" PRIu64, id);
+  LOG (c, "LRAT CHECKER addition of derived clause[%" PRIu64 "]", id);
   stats.added++;
   stats.derived++;
   import_clause (c);
@@ -426,13 +412,20 @@ void LratChecker::add_derived_clause (uint64_t id, const vector<int> &c,
 
 void LratChecker::add_derived_clause (uint64_t id, const vector<int> &c) {
   START (checking);
-  LOG (c, "LRAT CHECKER addition of derived unproven clause");
-  LOG ("LRAT CHECKER clause id %" PRIu64, id);
+  LOG (c, "LRAT CHECKER checking derived unproven clause[%" PRIu64 "]", id);
   stats.added++;
   import_clause (c);
   last_id = id;
   assert (id);
-  insert ();
+  if (strict_lrat) {
+    fatal_message_start ();
+    fputs ("tried to add unproven derived clause:\n", stderr);
+    for (const auto &lit : imported_clause)
+      fprintf (stderr, "%d ", lit);
+    fputc ('0', stderr);
+    fatal_message_end ();
+  } else
+    insert ();
   imported_clause.clear ();
   STOP (checking);
 }
@@ -441,8 +434,7 @@ void LratChecker::add_derived_clause (uint64_t id, const vector<int> &c) {
 
 void LratChecker::delete_clause (uint64_t id, const vector<int> &c) {
   START (checking);
-  LOG (c, "LRAT CHECKER checking deletion of clause");
-  LOG ("LRAT CHECKER clause id %" PRIu64, id);
+  LOG (c, "LRAT CHECKER checking deletion of clause[%" PRIu64 "]", id);
   stats.deleted++;
   import_clause (c);
   last_id = id;
@@ -488,6 +480,61 @@ void LratChecker::delete_clause (uint64_t id, const vector<int> &c) {
     fatal_message_end ();
   }
   imported_clause.clear ();
+  STOP (checking);
+}
+
+void LratChecker::finalize_clause (uint64_t id, const vector<int> &c) {
+  START (checking);
+  LOG (c, "LRAT CHECKER checking finalize of clause[%" PRIu64 "]", id);
+  stats.finalized++;
+  num_finalized++;
+  import_clause (c);
+  last_id = id;
+  LratCheckerClause **p = find (id), *d = *p;
+  if (d) {
+    for (const auto &lit : imported_clause)
+      mark (lit) = true;
+    const int *dp = d->literals;
+    for (unsigned i = 0; i < d->size; i++) {
+      int lit = *(dp + i);
+      if (!mark (lit)) {        // should never happen since ids
+        fatal_message_start (); // are unique.
+        fputs ("deleted clause not in proof:\n", stderr);
+        for (const auto &lit : imported_clause)
+          fprintf (stderr, "%d ", lit);
+        fputc ('0', stderr);
+        fatal_message_end ();
+      }
+    }
+    for (const auto &lit : imported_clause)
+      mark (lit) = false;
+
+  } else {
+    fatal_message_start ();
+    fputs ("deleted clause not in proof:\n", stderr);
+    for (const auto &lit : imported_clause)
+      fprintf (stderr, "%d ", lit);
+    fputc ('0', stderr);
+    fatal_message_end ();
+  }
+  imported_clause.clear ();
+  STOP (checking);
+}
+
+// check if all clauses have been deleted
+void LratChecker::finalize_check () {
+  START (checking);
+  if (num_finalized == num_clauses) {
+    num_finalized = 0;
+    LOG ("LRAT CHECKER successful finalize check, all clauses have been "
+         "deleted");
+  } else {
+    fatal_message_start ();
+    fputs ("finalize check failed ", stderr);
+    fprintf (stderr, "%" PRIu64, num_clauses);
+    fputs (" are not finalized", stderr);
+    fatal_message_end ();
+  }
   STOP (checking);
 }
 

@@ -456,10 +456,12 @@ bool Solver::set (const char *arg, int val) {
         "can only set option 'set (\"%s\", %d)' right after initialization",
         arg, val);
   }
+  /*
   if (strcmp (arg, "lrat")) {
     REQUIRE (!internal->external_prop,
              "lrat is currently not compatible with external propagation");
   }
+  */
   bool res = internal->opts.set (arg, val);
   LOG_API_CALL_END ("set", arg, val, res);
 
@@ -543,6 +545,8 @@ void Solver::add (int lit) {
     STATE (UNKNOWN);
   LOG_API_CALL_END ("add", lit);
 }
+
+bool Solver::inconsistent () { return internal->unsat; }
 
 void Solver::constrain (int lit) {
   TRACE ("constrain", lit);
@@ -681,6 +685,8 @@ bool Solver::flip (int lit) {
   REQUIRE_VALID_STATE ();
   REQUIRE_VALID_LIT (lit);
   REQUIRE (state () == SATISFIED, "can only flip value in satisfied state");
+  REQUIRE (!external->propagator,
+           "can only flip when no external propagator is present");
   bool res = external->flip (lit);
   LOG_API_CALL_RETURNS ("flip", lit, res);
   assert (state () == SATISFIED);
@@ -692,6 +698,8 @@ bool Solver::flippable (int lit) {
   REQUIRE_VALID_STATE ();
   REQUIRE_VALID_LIT (lit);
   REQUIRE (state () == SATISFIED, "can only flip value in satisfied state");
+  REQUIRE (!external->propagator,
+           "can only flip when no external propagator is present");
   bool res = external->flippable (lit);
   LOG_API_CALL_RETURNS ("flippable", lit, res);
   assert (state () == SATISFIED);
@@ -819,9 +827,11 @@ void Solver::connect_external_propagator (ExternalPropagator *propagator) {
   LOG_API_CALL_BEGIN ("connect_external_propagator");
   REQUIRE_VALID_STATE ();
   REQUIRE (propagator, "can not connect zero propagator");
+  /*
   REQUIRE (!internal->opts.lrat,
            "lrat is currently not compatible with external propagation");
   // TODO: require opts.lrat = false
+  */
 
 #ifdef LOGGING
   if (external->propagator)

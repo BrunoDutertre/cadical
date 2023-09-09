@@ -543,6 +543,8 @@ class Mobical : public Handler {
   friend struct FlippableCall;
   friend struct MeltCall;
   friend class MockPropagator;
+  friend struct ConnectCall;
+  friend struct DisconnectCall;
 
   /*----------------------------------------------------------------------*/
 
@@ -636,6 +638,12 @@ class Mobical : public Handler {
 
   void die (const char *fmt, ...);
   void warning (const char *fmt, ...);
+
+protected:
+  /*----------------------------------------------------------------------*/
+
+  MockPropagator
+      *mock_pointer; // to be able to clean up withouth disconnect
 
 public:
   Mobical ();
@@ -975,7 +983,16 @@ struct ConstrainCall : public Call {
 struct ConnectCall : public Call {
   ConnectCall () : Call (CONNECT) {}
   void execute (Solver *&s) {
-    s->connect_external_propagator (new MockPropagator (s));
+    // clean up if there was already one mock propagator
+    MockPropagator *prev_pointer = 0;
+    if (mobical.mock_pointer)
+      prev_pointer = mobical.mock_pointer;
+
+    mobical.mock_pointer = new MockPropagator (s);
+    s->connect_external_propagator (mobical.mock_pointer);
+
+    if (prev_pointer)
+      delete prev_pointer;
   }
   void print (ostream &o) { o << "connect mock-propagator" << endl; }
   Call *copy () { return new ConnectCall (); }
@@ -1032,8 +1049,10 @@ struct DisconnectCall : public Call {
         static_cast<MockPropagator *> (s->get_propagator ());
     mp->remove_new_observed_var ();
     s->disconnect_external_propagator ();
-    if (mp)
+    if (mp) {
       delete mp;
+      mobical.mock_pointer = 0;
+    }
   }
   void print (ostream &o) { o << "disconnect mock-propagator" << endl; }
   Call *copy () { return new DisconnectCall (); }
@@ -1365,7 +1384,10 @@ private:
 
   vector<int> observed_vars;
   bool in_connection = false;
+  // TODO remove this code eventually (see below where it is used).
+  /*
   bool is_lrat = false;
+  */
 
   void add_options (int expected);
   bool shrink_phases (int expected);
@@ -1565,13 +1587,11 @@ void Trace::generate_options (Random &random, Size size) {
   if (random.generate_double () < 0.8)
     push_back (new SetCall ("check", 1));
 
-  // There are two different internal checkers, one for lrat, one for drat
-  //
-  if (random.generate_double () < 0.3)
-    push_back (new SetCall ("checklrat", 0));
-
   // LRAT is incompatible with external_propagator so we set lrat here.
   //
+  // TODO remove this uncommented code after making it compatible...
+  //
+  /*
   if (!in_connection && random.generate_double () < 0.3) {
     push_back (new SetCall ("lrat", 1));
     is_lrat = true;
@@ -1579,6 +1599,7 @@ void Trace::generate_options (Random &random, Size size) {
     push_back (new SetCall ("lrat", 0));
     is_lrat = false;
   }
+  */
 
   // In 10% of the remaining cases we use a configuration.
   //
@@ -1613,8 +1634,10 @@ void Trace::generate_options (Random &random, Size size) {
       continue;
     if (!strcmp (o.name, "walk"))
       continue;
+    /*
     if (!strcmp (o.name, "lrat"))
       continue;
+    */
 
     // Probability to change an option is 'fraction'.
     //
@@ -2114,8 +2137,9 @@ void Trace::generate (uint64_t i, uint64_t s) {
       observed_vars.clear ();
       push_back (new DisconnectCall ());
       in_connection = false;
-    } else if (!is_lrat)
+    } else {
       generate_propagator (random, minvars, maxvars);
+    }
 
     generate_constraint (random, minvars, maxvars, uniform);
     generate_assume (random, maxvars);
@@ -3592,6 +3616,8 @@ Mobical::Mobical ()
 Mobical::~Mobical () {
   if (shared)
     munmap (shared, sizeof *shared);
+  if (mock_pointer)
+    delete mock_pointer;
 }
 
 void Mobical::catch_signal (int) {
@@ -3819,7 +3845,8 @@ int Mobical::main (int argc, char **argv) {
   terminal.normal ();
   prefix ();
   terminal.magenta (1);
-  fputs ("Copyright (c) 2018-2021 A. Biere, M. Fleury, N. Froleyks\n",
+  fputs ("Copyright (c) 2018-2023 A. Biere, M. Fleury, N. Froleyks, K. "
+         "Fazekas\n",
          stderr);
   terminal.normal ();
   empty_line ();
