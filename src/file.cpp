@@ -219,6 +219,7 @@ FILE *File::read_pipe (Internal *internal, const char *fmt, const int *sig,
 
 FILE *File::write_pipe (Internal *internal, const char *fmt,
                         const char *path) {
+  // check and santiize path here: return NULL if suspicious
   MSG ("opening pipe to write '%s'", path);
   return open_pipe (internal, fmt, path, "w");
 }

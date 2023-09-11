@@ -161,6 +161,7 @@ struct Internal {
   bool stable;                 // true during stabilization phase
   bool reported;               // reported in this solving call
   bool external_prop;         // true if an external propagator is connected
+  bool did_external_prop;     // true if ext. propagation happened
   bool external_prop_is_lazy; // true if the external propagator is lazy
   char rephased;              // last type of resetting phases
   Reluctant reluctant;        // restart counter in stable mode
@@ -180,7 +181,7 @@ struct Internal {
       probehbr_chains;          // only used if opts.probehbr=false
   int level;                    // decision level ('control.size () - 1')
   Phases phases;                // saved, target and best phases
-  signed char *base_vals;     // allocated array: we have vals = base_vals + vsize
+  signed char *base_vals;       // allocated array: we have vals = base_vals + vsize
   signed char *vals;            // assignment [-max_var,max_var]
   vector<signed char> marks;    // signed marks [1,max_var]
   vector<unsigned> frozentab;   // frozen counters [1,max_var]
@@ -571,7 +572,7 @@ struct Internal {
   // Forward reasoning through propagation in 'propagate.cpp'.
   //
   int assignment_level (int lit, Clause *);
-  void build_chain_for_units (int lit, Clause *reason);
+  void build_chain_for_units (int lit, Clause *reason, bool forced);
   void build_chain_for_empty ();
   void search_assign (int lit, Clause *);
   void search_assign_driving (int lit, Clause *reason);
@@ -598,6 +599,7 @@ struct Internal {
   //
   void learn_empty_clause ();
   void learn_unit_clause (int lit);
+  void learn_external_propagated_unit_clause (int lit);
   void bump_variable (int lit);
   void bump_variables ();
   int recompute_glue (Clause *);
@@ -1241,7 +1243,12 @@ struct Internal {
     unsigned &ref = frozentab[idx];
     if (ref < UINT_MAX) {
       if (!--ref) {
-        LOG ("variable %d completely molten", idx);
+        if (relevanttab[idx]) {
+          LOG ("variable %d is observed, can not be completely molten",
+               idx);
+          ref++;
+        } else
+          LOG ("variable %d completely molten", idx);
       } else
         LOG ("variable %d melted once but remains frozen %u times", lit,
              ref);

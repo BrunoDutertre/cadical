@@ -24,7 +24,7 @@ struct LratCheckerClause {
   unsigned size;
   bool used;
   bool tautological;
-  int literals[0]; // 'literals' of length 'size'
+  int literals[1]; // 'literals' of length 'size'
 };
 
 /*------------------------------------------------------------------------*/
@@ -36,6 +36,7 @@ class LratChecker {
   // Capacity of variable values.
   //
   int64_t size_vars;
+  bool strict_lrat;
 
   // The 'watchers' and 'marks' data structures are not that time critical
   // and thus we access them by first mapping a literal to 'unsigned'.
@@ -48,7 +49,8 @@ class LratChecker {
   vector<signed char> checked_lits;
   vector<signed char> marks; // mark bits of literals
 
-  uint64_t num_clauses;        // number of clauses in hash table
+  uint64_t num_clauses; // number of clauses in hash table
+  uint64_t num_finalized;
   uint64_t num_garbage;        // number of garbage clauses
   uint64_t size_clauses;       // size of clause hash table
   LratCheckerClause **clauses; // hash table of clauses
@@ -93,7 +95,8 @@ class LratChecker {
     int64_t original; // number of added original clauses
     int64_t derived;  // number of added derived clauses
 
-    int64_t deleted; // number of deleted clauses
+    int64_t deleted;   // number of deleted clauses
+    int64_t finalized; // number of finalized clauses
 
     int64_t insertions; // number of clauses added to hash table
     int64_t collisions; // number of hash collisions in 'find'
@@ -120,6 +123,12 @@ public:
 
   // check if the clause is present and delete it from the checker
   void delete_clause (uint64_t, const vector<int> &);
+
+  // check if the clause is present and delete it from the checker
+  void finalize_clause (uint64_t, const vector<int> &);
+
+  // check if all clauses have been deleted
+  void finalize_check ();
 
   void print_stats ();
   void dump (); // for debugging purposes only

@@ -10,15 +10,15 @@ Internal::Internal ()
       localsearching (false), lookingahead (false), preprocessing (false),
       protected_reasons (false), force_saved_phase (false),
       searching_lucky_phases (false), stable (false), reported (false),
-      external_prop (false), external_prop_is_lazy (true), rephased (0),
-      vsize (0), max_var (0), clause_id (0), original_id (0),
-      reserved_ids (0), level (0), base_vals (0), vals (0), score_inc (1.0), scores (this),
-      conflict (0), ignore (0), external_reason (&external_reason_clause),
-      notified (0), propagated (0), propagated2 (0), propergated (0),
-      best_assigned (0), target_assigned (0), no_conflict_until (0),
-      unsat_constraint (false), marked_failed (true), proof (0),
-      checker (0), tracer (0), lratchecker (0), lratbuilder (0),
-      opts (this),
+      external_prop (false), did_external_prop (false),
+      external_prop_is_lazy (true), rephased (0), vsize (0), max_var (0),
+      clause_id (0), original_id (0), reserved_ids (0), conflict_id (0),
+      level (0), base_vals (0), vals (0), score_inc (1.0), scores (this), conflict (0),
+      ignore (0), external_reason (&external_reason_clause), notified (0),
+      propagated (0), propagated2 (0), propergated (0), best_assigned (0),
+      target_assigned (0), no_conflict_until (0), unsat_constraint (false),
+      marked_failed (true), proof (0), checker (0), tracer (0),
+      lratchecker (0), lratbuilder (0), opts (this),
 #ifndef QUIET
       profiles (this), force_phase_messages (false),
 #endif
@@ -178,8 +178,10 @@ void Internal::add_original_lit (int lit) {
       // Use the external form of the clause for printing in proof
       // Externalize(internalized literal) != external literal
       assert (!original.size () || !external->eclause.empty ());
-      proof->add_original_clause (id, original);
-      // proof->add_external_original_clause (id, external->eclause);
+      if (opts.lrat)
+        proof->add_external_original_clause (id, external->eclause);
+      else
+        proof->add_external_original_clause (id, external->eclause);
     }
     add_new_original_clause (id);
     original.clear ();
@@ -193,8 +195,8 @@ void Internal::reserve_ids (int number) {
   assert (number >= 0);
   assert (!clause_id && !reserved_ids && !original_id);
   clause_id = reserved_ids = number;
-  if (tracer)
-    tracer->set_first_id (reserved_ids);
+  if (proof)
+    proof->set_first_id (reserved_ids);
 }
 
 /*------------------------------------------------------------------------*/
@@ -691,8 +693,11 @@ int Internal::solve (bool preprocess_only) {
       res = local_search ();
     if (!res)
       res = lucky_phases ();
-    if (!res || external_prop)
+    if (!res || (res == 10 && external_prop)) {
+      if (res == 10 && external_prop && level)
+        backtrack ();
       res = cdcl_loop_with_inprocessing ();
+    }
   }
   finalize ();
   reset_solving ();
@@ -787,17 +792,38 @@ int Internal::lookahead () {
 /*------------------------------------------------------------------------*/
 
 void Internal::finalize () {
-  if (!proof || !opts.lratfrat)
+  if (!proof)
     return;
   LOG ("finalizing");
-  proof->finalize_clause (conflict_id, {});
+  // finalize external units
+  for (const auto &evar : external->vars) {
+    assert (evar > 0);
+    const auto eidx = 2 * evar;
+    int sign = 1;
+    uint64_t id = external->ext_units[eidx];
+    if (!id) {
+      sign = -1;
+      id = external->ext_units[eidx + 1];
+    }
+    if (id) {
+      proof->finalize_external_unit (id, evar * sign);
+    }
+  }
+  // finalize internal units
   for (const auto &lit : lits) {
-    // if (idx > (unsigned) max_var) break;
+    const auto elit = externalize (lit);
+    if (elit) {
+      const unsigned eidx = (elit < 0) + 2u * (unsigned) abs (elit);
+      const uint64_t id = external->ext_units[eidx];
+      if (id) {
+        assert (unit_clauses[vlit (lit)] == id);
+        continue;
+      }
+    }
     const auto uidx = vlit (lit);
     const uint64_t id = unit_clauses[uidx];
     if (!id)
       continue;
-    // const int lit = u2i (uidx);
     proof->finalize_unit (id, lit);
   }
   // See the discussion in 'propagate' on why garbage binary clauses stick
@@ -805,6 +831,13 @@ void Internal::finalize () {
   for (const auto &c : clauses)
     if (!c->garbage || c->size == 2)
       proof->finalize_clause (c);
+
+  // finalize conflict and proof
+  if (conflict_id)
+    proof->finalize_clause (conflict_id, {});
+  if (proof) {
+    proof->finalize_proof (conflict_id);
+  }
 }
 
 /*------------------------------------------------------------------------*/
