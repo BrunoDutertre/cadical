@@ -11,9 +11,16 @@ extern "C" {
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <unistd.h>
 }
+
+#ifndef _WIN32
+
+extern "C" {
+#include <sys/wait.h>
+};
+
+#endif
 
 /*------------------------------------------------------------------------*/
 
@@ -243,10 +250,15 @@ FILE *File::read_pipe (Internal *internal, const char *fmt, const int *sig,
   return open_pipe (internal, fmt, path, "r");
 }
 
+#ifndef _WIN32
+
 FILE *File::write_pipe (Internal *internal, const char *command,
                         const char *path, int &child_pid) {
   assert (command[0] && command[0] != ' ');
   MSG ("writing through command '%s' to '%s'", command, path);
+#ifdef QUIET
+  (void) internal;
+#endif
   std::vector<char *> args;
   split_str (command, args);
   assert (!args.empty ());
@@ -285,6 +297,8 @@ FILE *File::write_pipe (Internal *internal, const char *command,
   delete_str_vector (args);
   return res;
 }
+
+#endif
 
 /*------------------------------------------------------------------------*/
 
@@ -334,6 +348,7 @@ File *File::read (Internal *internal, const char *path) {
 File *File::write (Internal *internal, const char *path) {
   FILE *file;
   int close_output = 3, child_pid = 0;
+#ifndef _WIN32
   if (has_suffix (path, ".xz"))
     file = write_pipe (internal, "xz -c", path, child_pid);
   else if (has_suffix (path, ".bz2"))
@@ -343,6 +358,7 @@ File *File::write (Internal *internal, const char *path) {
   else if (has_suffix (path, ".7z"))
     file = write_pipe (internal, "7z a -an -txz -si -so", path, child_pid);
   else
+#endif
     file = write_file (internal, path), close_output = 1;
 
   if (!file)
@@ -351,30 +367,42 @@ File *File::write (Internal *internal, const char *path) {
   return new File (internal, true, close_output, child_pid, file, path);
 }
 
-void File::close () {
+void File::close (bool print) {
   assert (file);
+#ifndef QUIET
+  if (internal->opts.quiet)
+    print = false;
+  else if (internal->opts.verbose > 0)
+    print = true;
+#endif
   if (close_file == 0) {
-    MSG ("disconnecting from '%s'", name ());
+    if (print)
+      MSG ("disconnecting from '%s'", name ());
   }
   if (close_file == 1) {
-    MSG ("closing file '%s'", name ());
+    if (print)
+      MSG ("closing file '%s'", name ());
     fclose (file);
   }
   if (close_file == 2) {
-    MSG ("closing input pipe to read '%s'", name ());
+    if (print)
+      MSG ("closing input pipe to read '%s'", name ());
     pclose (file);
   }
+#ifndef _WIN32
   if (close_file == 3) {
-    MSG ("closing output pipe to write '%s'", name ());
+    if (print)
+      MSG ("closing output pipe to write '%s'", name ());
     fclose (file);
     waitpid (child_pid, 0, 0);
   }
+#endif
   file = 0; // mark as closed
 
   // TODO what about error checking for 'fclose', 'pclose' or 'waitpid'?
 
 #ifndef QUIET
-  if (internal->opts.verbose > 1) {
+  if (print) {
     if (writing) {
       uint64_t written_bytes = bytes ();
       double written_mb = written_bytes / (double) (1 << 20);

@@ -1,4 +1,33 @@
-Version 1.7.2
+Version 1.8.0
+-------------
+
+- Explicit `Solver::clause` functions to simplify clause addition.
+
+- More fine-grained handling of printing proof size information by
+  adding `bool print = false` flags to the `flush_proof_trace` and
+  the `close_proof_trace` API calls.  The former prints the number
+  of addition and deletion steps, while the latter prints the size
+  of the proof size (and the actual number of bytes if compressed).
+  The main effect is that by default printing of proof size disabled
+  for API usage but enabled for the stand-alone solver.
+
+Version 1.7.5
+-------------
+
+- Decreased verbosity level for printing proof size.
+
+Version 1.7.4
+-------------
+
+- As `fork` and `wait` do not exist on Windows writing compressed files
+  through `pipe/fork/exec/wait` has to be disabled for Windows cross
+  compilation to go through.  Alternatively one could go back to `popen`
+  for writing compressed files on Windows which however is not safe and
+  therefore we simply decided to disable that feature for windows.
+  Compressed file reading still (and as far we are aware safely) uses
+  `popen` and thus also compiles for Windows.
+
+Version 1.7.3
 -------------
 
 - Replaced the unsafe `popen` approach for compressed file writing
