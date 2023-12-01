@@ -172,7 +172,6 @@ Checker::Checker (Internal *i)
       inconsistent (false), num_clauses (0), num_garbage (0),
       size_clauses (0), clauses (0), garbage (0), next_to_propagate (0),
       last_hash (0) {
-  LOG ("CHECKER new");
 
   // Initialize random number table for hash function.
   //
@@ -186,6 +185,11 @@ Checker::Checker (Internal *i)
   }
 
   memset (&stats, 0, sizeof (stats)); // Initialize statistics.
+}
+
+void Checker::connect_internal (Internal *i) {
+  internal = i;
+  LOG ("CHECKER connected to internal");
 }
 
 Checker::~Checker () {
@@ -491,7 +495,8 @@ void Checker::add_clause (const char *type) {
     insert ();
 }
 
-void Checker::add_original_clause (uint64_t id, const vector<int> &c) {
+void Checker::add_original_clause (uint64_t id, bool, const vector<int> &c,
+                                   bool) {
   if (inconsistent)
     return;
   START (checking);
@@ -509,7 +514,8 @@ void Checker::add_original_clause (uint64_t id, const vector<int> &c) {
   STOP (checking);
 }
 
-void Checker::add_derived_clause (uint64_t id, const vector<int> &c) {
+void Checker::add_derived_clause (uint64_t id, bool, const vector<int> &c,
+                                  const vector<uint64_t> &) {
   if (inconsistent)
     return;
   START (checking);
@@ -536,7 +542,7 @@ void Checker::add_derived_clause (uint64_t id, const vector<int> &c) {
 
 /*------------------------------------------------------------------------*/
 
-void Checker::delete_clause (uint64_t id, const vector<int> &c) {
+void Checker::delete_clause (uint64_t id, bool, const vector<int> &c) {
   if (inconsistent)
     return;
   START (checking);
@@ -572,6 +578,12 @@ void Checker::delete_clause (uint64_t id, const vector<int> &c) {
   simplified.clear ();
   unsimplified.clear ();
   STOP (checking);
+}
+
+void Checker::add_assumption_clause (uint64_t id, const vector<int> &c,
+                                     const vector<uint64_t> &chain) {
+  add_derived_clause (id, true, c, chain);
+  delete_clause (id, true, c);
 }
 
 /*------------------------------------------------------------------------*/
