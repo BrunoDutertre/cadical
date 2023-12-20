@@ -607,11 +607,13 @@ void Internal::produce_failed_assumptions () {
   assert (!assumptions.empty ());
   while (!unsat) {
     assert (!satisfied ());
+    notify_assignments ();
     if (decide ())
       break;
     while (!unsat && !propagate ())
       analyze ();
   }
+  notify_assignments ();
   if (unsat)
     LOG ("formula is actually unsatisfiable unconditionally");
   else
@@ -691,6 +693,8 @@ int Internal::local_search () {
 int Internal::solve (bool preprocess_only) {
   assert (clause.empty ());
   START (solve);
+  if (proof)
+    proof->solve_query ();
   if (opts.ilb) {
     if (opts.ilbassumptions)
       sort_and_reuse_assumptions ();
@@ -790,6 +794,7 @@ int Internal::restore_clauses () {
     report ('*');
   } else {
     report ('+');
+    remove_garbage_binaries ();
     external->restore_clauses ();
     internal->report ('r');
     if (!unsat && !level && !propagate ()) {
@@ -870,6 +875,10 @@ void Internal::finalize (int res) {
     proof->finalize_clause (conflict_id, {});
   }
   proof->report_status (res, conflict_id);
+  if (res == 10)
+    external->conclude_sat ();
+  else if (res == 20)
+    conclude_unsat ();
 }
 
 /*------------------------------------------------------------------------*/
@@ -912,6 +921,34 @@ void Internal::dump () {
   fflush (stdout);
 }
 
+/*------------------------------------------------------------------------*/
+
+bool Internal::traverse_constraint (ClauseIterator &it) {
+  if (constraint.empty () && !unsat_constraint)
+    return true;
+
+  vector<int> eclause;
+  if (unsat)
+    return it.clause (eclause);
+
+  LOG (constraint, "traversing constraint");
+  bool satisfied = false;
+  for (auto ilit : constraint) {
+    const int tmp = fixed (ilit);
+    if (tmp > 0) {
+      satisfied = true;
+      break;
+    }
+    if (tmp < 0)
+      continue;
+    const int elit = externalize (ilit);
+    eclause.push_back (elit);
+  }
+  if (!satisfied && !it.clause (eclause))
+    return false;
+
+  return true;
+}
 /*------------------------------------------------------------------------*/
 
 bool Internal::traverse_clauses (ClauseIterator &it) {
