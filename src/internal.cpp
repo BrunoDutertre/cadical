@@ -20,8 +20,8 @@ Internal::Internal ()
       tainted_literal (0), notified (0), probe_reason (0), propagated (0),
       propagated2 (0), propergated (0), best_assigned (0),
       target_assigned (0), no_conflict_until (0), unsat_constraint (false),
-      marked_failed (true), multitrail_dirty (0), num_assigned (0),
-      proof (0), lratbuilder (0), opts (this),
+      marked_failed (true), num_assigned (0), proof (0), lratbuilder (0),
+      opts (this),
 #ifndef QUIET
       profiles (this), force_phase_messages (false),
 #endif
@@ -47,7 +47,6 @@ Internal::~Internal () {
   if (base_vals) {
     delete[] base_vals;
   }
-  clear_trails (0);
 }
 
 /*------------------------------------------------------------------------*/
@@ -701,9 +700,7 @@ int Internal::solve (bool preprocess_only) {
     stats.ilbtriggers++;
     stats.ilbsuccess += (level > 0);
     stats.levelsreused += level;
-    if (opts.reimply)
-      stats.literalsreused += num_assigned - trail.size ();
-    else if (level) {
+    if (level) {
       assert (control.size () > 1);
       stats.literalsreused += num_assigned - control[1].trail;
     }
