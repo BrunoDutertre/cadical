@@ -14,7 +14,7 @@ Internal::Internal ()
       external_prop_is_lazy (true), rephased (0), vsize (0), max_var (0),
       clause_id (0), original_id (0), reserved_ids (0), conflict_id (0),
       concluded (false), lrat (false), level (0), base_vals (0), vals (0), score_inc (1.0),
-      scores (this), conflict (0), ignore (0),
+      scores (this), conflict (0), ignore (0), dummy_binary (0),
       external_reason (&external_reason_clause), newest_clause (0),
       force_no_backtrack (false), from_propagator (false),
       tainted_literal (0), notified (0), probe_reason (0), propagated (0),
@@ -29,9 +29,25 @@ Internal::Internal ()
       termination_forced (false), vars (this->max_var),
       lits (this->max_var) {
   control.push_back (Level (0, 0));
+
+  // The 'dummy_binary' is used in 'try_to_subsume_clause' to fake a real
+  // clause, which then can be used to subsume or strengthen the given
+  // clause in one routine for both binary and non binary clauses.  This
+  // fake binary clause is always kept non-redundant (and not-moved etc.)
+  // due to the following 'memset'.  Only literals will be changed.
+
+  // In a previous version we used local automatic allocated 'Clause' on the
+  // stack, which became incompatible with several compilers (see the
+  // discussion on flexible array member in 'Clause.cpp').
+
+  size_t bytes = Clause::bytes (2);
+  dummy_binary = (Clause *) new char[bytes];
+  memset (dummy_binary, 0, bytes);
+  dummy_binary->size = 2;
 }
 
 Internal::~Internal () {
+  delete[](char *) dummy_binary;
   for (const auto &c : clauses)
     delete_clause (c);
   if (proof)
