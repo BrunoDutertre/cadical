@@ -53,10 +53,10 @@ contrib/%.o: $(ROOT)/contrib/%.cpp $(ROOT)/contrib/%.hpp $(ROOT)/src/*.hpp makef
 # Application binaries (the stand alone solver 'cadical' and the model based
 # tester 'mobical') and the library are the main build targets.
 
-cadical: cadical.o libcadical.a makefile $(LIBS)
+cadical: src/cadical.o libcadical.a makefile $(LIBS)
 	$(COMPILE) -o $@ $< -L. libcadical.a $(LIBS)
 
-mobical: mobical.o libcadical.a makefile $(LIBS)
+mobical: src/mobical.o libcadical.a makefile $(LIBS)
 	$(COMPILE) -o $@ $< -L. libcadical.a $(LIBS)
 
 
