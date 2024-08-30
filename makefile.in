@@ -66,11 +66,11 @@ libcadical.a: $(OBJ_SOLVER) $(OBJ_CONTRIB) makefile
 #
 # Dynamic libraries
 #
-libcadical.so: $(OBJ)
-	$(CXX) -shared -o $@ $(OBJ)
+libcadical.so: $(OBJ_SOLVER) $(OBJ_CONTRIB)
+	$(CXX) -shared -o $@ $(OBJ_SOLVER) $(OBJ_CONTRIB)
 
-libcadical.dylib: $(OBJ)
-	$(CXX) -shared -o $@ $(OBJ)
+libcadical.dylib: $(OBJ_SOLVER) $(OBJ_CONTRIB)
+	$(CXX) -shared -o $@ $(OBJ_SOLVER) $(OBJ_CONTRIB)
 
 
 #--------------------------------------------------------------------------#
