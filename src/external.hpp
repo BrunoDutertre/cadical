@@ -5,6 +5,7 @@
 
 #include "range.hpp"
 #include <unordered_map>
+#include <vector>
 
 /*------------------------------------------------------------------------*/
 
@@ -100,17 +101,17 @@ struct External {
   // If there is a listener for fixed assignments.
 
   FixedAssignmentListener *fixed_listener;
-  
+
   // If there is an external propagator.
 
   ExternalPropagator *propagator;
 
   vector<bool> is_observed; // Quick flag for each external variable
 
-  // Saved 'forgettable' original clauses coming from the external propagator.
-  // The value of the map starts with a Boolean flag indicating if the clause
-  // is still present or got already deleted, and then followed by the literals
-  // of the clause.
+  // Saved 'forgettable' original clauses coming from the external
+  // propagator. The value of the map starts with a Boolean flag indicating
+  // if the clause is still present or got already deleted, and then
+  // followed by the literals of the clause.
   unordered_map<uint64_t, vector<int>> forgettable_original;
 
   void add_observed_var (int elit);
@@ -273,7 +274,7 @@ struct External {
 
   void reset_assumptions ();
 
-  // similarily to 'failed', 'conclude' needs to know about failing
+  // Similarly to 'failed', 'conclude' needs to know about failing
   // assumptions and therefore needs to be reset when leaving the
   // 'UNSATISFIED' state.
   //
@@ -342,6 +343,11 @@ struct External {
 
   /*----------------------------------------------------------------------*/
 
+  int propagate_assumptions ();
+  void get_entrailed_literals (std::vector<int> &entrailed);
+  void conclude_unknown ();
+
+  /*----------------------------------------------------------------------*/
   int lookahead ();
   CaDiCaL::CubesWithStatus generate_cubes (int, int);
 
