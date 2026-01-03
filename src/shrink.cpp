@@ -68,12 +68,21 @@ int inline Internal::shrink_literal (int lit, int blevel,
   assert (val (lit) < 0);
 
   Flags &f = flags (lit);
-  const Var &v = var (lit);
+  Var &v = var (lit);
   assert (v.level <= blevel);
 
   if (!v.level) {
     LOG ("skipping root level assigned %d", (lit));
     return 0;
+  }
+
+  if (v.reason == external_reason) {
+    assert (!opts.exteagerreasons);
+    v.reason = learn_external_reason_clause (-lit, 0, true);
+    if (!v.reason) {
+      assert (!v.level);
+      return 0;
+    }
   }
   assert (v.reason != external_reason);
   if (f.shrinkable) {
@@ -190,6 +199,7 @@ void Internal::push_literals_of_block (
 unsigned inline Internal::shrink_next (int blevel, unsigned &open,
                                        unsigned &max_trail) {
   const auto &t = &trail;
+  (void) blevel;
   if (opts.shrinkreap) {
     assert (!reap.empty ());
     const unsigned dist = reap.pop ();
@@ -215,7 +225,6 @@ unsigned inline Internal::shrink_next (int blevel, unsigned &open,
     LOG ("open is now %d, uip = %d, level %d", open, uip, blevel);
     return uip;
   }
-  (void) blevel;
 }
 
 unsigned inline Internal::shrink_along_reason (int uip, int blevel,
@@ -232,6 +241,9 @@ unsigned inline Internal::shrink_along_reason (int uip, int blevel,
   assert (f.shrinkable);
   assert (v.level == blevel);
   assert (v.reason);
+
+  if (opts.minimizeticks)
+    stats.ticks.search[stable]++;
 
   if (resolve_large_clauses || v.reason->size == 2) {
     const Clause &c = *v.reason;

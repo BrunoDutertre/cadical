@@ -11,17 +11,19 @@ Internal::Internal ()
       protected_reasons (false), force_saved_phase (false),
       searching_lucky_phases (false), stable (false), reported (false),
       external_prop (false), did_external_prop (false),
-      external_prop_is_lazy (true), forced_backt_allowed (false), 
-      private_steps (false), rephased (0), vsize (0), max_var (0), 
-      clause_id (0), original_id (0), reserved_ids (0), 
-      conflict_id (0), concluded (false), lrat (false), level (0), base_vals (0), vals (0),
-      score_inc (1.0), scores (this), conflict (0), ignore (0),
-      external_reason (&external_reason_clause), newest_clause (0),
-      force_no_backtrack (false), from_propagator (false), ext_clause_forgettable (false),
-      tainted_literal (0), notified (0), probe_reason (0), propagated (0),
+      external_prop_is_lazy (true), forced_backt_allowed (false),
+      private_steps (false), rephased (0), vsize (0), max_var (0),
+      clause_id (0), original_id (0), reserved_ids (0), conflict_id (0),
+      saved_decisions (0), concluded (false), lrat (false), frat (false),
+      level (0), base_vals (0), vals (0), score_inc (1.0), scores (this), conflict (0),
+      ignore (0), external_reason (&external_reason_clause),
+      newest_clause (0), force_no_backtrack (false),
+      from_propagator (false), ext_clause_forgettable (false),
+      changed_val (0), notified (0), probe_reason (0), propagated (0),
       propagated2 (0), propergated (0), best_assigned (0),
       target_assigned (0), no_conflict_until (0), unsat_constraint (false),
-      marked_failed (true), num_assigned (0), proof (0), lratbuilder (0),
+      marked_failed (true), sweep_incomplete (false),
+      randomized_deciding (false), citten (0), num_assigned (0), proof (0),
       opts (this),
 #ifndef QUIET
       profiles (this), force_phase_messages (false),
@@ -32,8 +34,10 @@ Internal::Internal ()
   control.push_back (Level (0, 0));
 
   // The 'dummy_binary' is used in 'try_to_subsume_clause' to fake a real
-  // clause, which then can be used to subsume or strengthen the given
-  // clause in one routine for both binary and non binary clauses.  This
+  // clause (which then can be used to subsume or strengthen the given
+  // clause in one routine for both binary and non binary clauses) and
+  // in walk (which is only used as a placeholder in the watch lists
+  // when logging is off, since the clause is not accessed).  This
   // fake binary clause is always kept non-redundant (and not-moved etc.)
   // due to the following 'memset'.  Only literals will be changed.
 
@@ -45,16 +49,24 @@ Internal::Internal ()
   dummy_binary = (Clause *) new char[bytes];
   memset (dummy_binary, 0, bytes);
   dummy_binary->size = 2;
+
+  /*with C++17: static_*/ assert (max_used == (1 << USED_SIZE) - 1);
 }
 
 Internal::~Internal () {
-  delete[](char *) dummy_binary;
+  // If a memory exception ocurred a profile might still be active.
+#ifndef QUIET
+#define PROFILE(NAME, LEVEL) \
+  if (PROFILE_ACTIVE (NAME)) \
+    STOP (NAME);
+  PROFILES
+#undef PROFILE
+#endif
+  delete[] (char *) dummy_binary;
   for (const auto &c : clauses)
     delete_clause (c);
   if (proof)
     delete proof;
-  if (lratbuilder)
-    delete lratbuilder;
   for (auto &tracer : tracers)
     delete tracer;
   for (auto &filetracer : file_tracers)
@@ -102,39 +114,25 @@ void Internal::enlarge_vals (size_t new_vsize) {
   if (base_vals) {
     memcpy (new_vals - max_var, vals - max_var, 2u * max_var + 1u);
     delete[] base_vals;
-  }
+  } else
+    assert (!vsize);
+    
   base_vals = new_base_vals;
   vals = new_vals;
 }
 
 /*------------------------------------------------------------------------*/
 
-template <class T>
-static void enlarge_init (vector<T> &v, size_t N, const T &i) {
-  if (v.size () < N)
-    v.resize (N, i);
-}
-
-template <class T> static void enlarge_only (vector<T> &v, size_t N) {
-  if (v.size () < N)
-    v.resize (N, T ());
-}
-
-template <class T> static void enlarge_zero (vector<T> &v, size_t N) {
-  enlarge_init (v, N, (const T &) 0);
-}
-
-/*------------------------------------------------------------------------*/
-
 void Internal::enlarge (int new_max_var) {
   // New variables can be created that can invoke enlarge anytime (via calls
-  // during ipasir-up call-backs), thus assuming (!level) is not correct 
+  // during ipasir-up call-backs), thus assuming (!level) is not correct
   size_t new_vsize = vsize ? 2 * vsize : 1 + (size_t) new_max_var;
   while (new_vsize <= (size_t) new_max_var)
     new_vsize *= 2;
   LOG ("enlarge internal size from %zd to new size %zd", vsize, new_vsize);
   // Ordered in the size of allocated memory (larger block first).
-  enlarge_zero (unit_clauses, 2 * new_vsize);
+  if (lrat || frat)
+    enlarge_zero (unit_clauses_idx, 2 * new_vsize);
   enlarge_only (wtab, 2 * new_vsize);
   enlarge_only (vtab, new_vsize);
   enlarge_zero (parents, new_vsize);
@@ -145,24 +143,23 @@ void Internal::enlarge (int new_max_var) {
   enlarge_init (ptab, 2 * new_vsize, -1);
   enlarge_only (ftab, new_vsize);
   enlarge_vals (new_vsize);
-  enlarge_zero (frozentab, new_vsize);
-  enlarge_zero (relevanttab, new_vsize);
+  vsize = new_vsize;
+  if (external)
+    enlarge_zero (relevanttab, new_vsize);
   const signed char val = opts.phase ? 1 : -1;
   enlarge_init (phases.saved, new_vsize, val);
   enlarge_zero (phases.forced, new_vsize);
   enlarge_zero (phases.target, new_vsize);
   enlarge_zero (phases.best, new_vsize);
   enlarge_zero (phases.prev, new_vsize);
-  enlarge_zero (phases.min, new_vsize);
   enlarge_zero (marks, new_vsize);
-  vsize = new_vsize;
 }
 
 void Internal::init_vars (int new_max_var) {
   if (new_max_var <= max_var)
     return;
   // New variables can be created that can invoke enlarge anytime (via calls
-  // during ipasir-up call-backs), thus assuming (!level) is not correct 
+  // during ipasir-up call-backs), thus assuming (!level) is not correct
   LOG ("initializing %d internal variables from %d to %d",
        new_max_var - max_var, max_var + 1, new_max_var);
   if ((size_t) new_max_var >= vsize)
@@ -193,7 +190,7 @@ void Internal::add_original_lit (int lit) {
   if (lit) {
     original.push_back (lit);
   } else {
-    const uint64_t id =
+    const int64_t id =
         original_id < reserved_ids ? ++original_id : ++clause_id;
     if (proof) {
       // Use the external form of the clause for printing in proof
@@ -202,27 +199,28 @@ void Internal::add_original_lit (int lit) {
       proof->add_external_original_clause (id, false, external->eclause);
     }
     if (internal->opts.check &&
-      (internal->opts.checkwitness || internal->opts.checkfailed)) {
+        (internal->opts.checkwitness || internal->opts.checkfailed)) {
       bool forgettable = from_propagator && ext_clause_forgettable;
-      if (forgettable) {
+      if (forgettable && opts.check) {
         assert (!original.size () || !external->eclause.empty ());
 
         // First integer is the presence-flag (even if the clause is empty)
         external->forgettable_original[id] = {1};
-       
-        for (auto const& elit : external->eclause)
-          external->forgettable_original[id].push_back(elit);
-        
-        LOG (external->eclause, "clause added to external forgettable map:");
+
+        for (auto const &elit : external->eclause)
+          external->forgettable_original[id].push_back (elit);
+
+        LOG (external->eclause,
+             "clause added to external forgettable map:");
       }
     }
-    
+
     add_new_original_clause (id);
     original.clear ();
   }
 }
 
-void Internal::finish_added_clause_with_id (uint64_t id, bool restore) {
+void Internal::finish_added_clause_with_id (int64_t id, bool restore) {
   if (proof) {
     // Use the external form of the clause for printing in proof
     // Externalize(internalized literal) != external literal
@@ -248,6 +246,35 @@ void Internal::reserve_ids (int number) {
 
 /*------------------------------------------------------------------------*/
 
+#ifdef PROFILE_MODE
+
+// Separating these makes it easier to profile stable and unstable search.
+
+bool Internal::propagate_wrapper () {
+  if (stable)
+    return propagate_stable ();
+  else
+    return propagate_unstable ();
+}
+
+void Internal::analyze_wrapper () {
+  if (stable)
+    analyze_stable ();
+  else
+    analyze_unstable ();
+}
+
+int Internal::decide_wrapper () {
+  if (stable)
+    return decide_stable ();
+  else
+    return decide_unstable ();
+}
+
+#endif
+
+/*------------------------------------------------------------------------*/
+
 // This is the main CDCL loop with interleaved inprocessing.
 
 int Internal::cdcl_loop_with_inprocessing () {
@@ -269,8 +296,8 @@ int Internal::cdcl_loop_with_inprocessing () {
       res = 20;
     else if (unsat_constraint)
       res = 20;
-    else if (!propagate ())
-      analyze (); // propagate and analyze
+    else if (!propagate_wrapper ())
+      analyze_wrapper (); // propagate and analyze
     else if (iterating)
       iterate ();                               // report learned unit
     else if (!external_propagate () || unsat) { // external propagation
@@ -296,11 +323,9 @@ int Internal::cdcl_loop_with_inprocessing () {
       rephase (); // reset variable phases
     else if (reducing ())
       reduce (); // collect useless clauses
-    else if (probing ())
-      probe (); // failed literal probing
-    else if (subsuming ())
-      subsume (); // subsumption algorithm
-    else if (eliminating ())
+    else if (inprobing ())
+      inprobe (); // schedule of inprocessing
+    else if (ineliminating ())
       elim (); // variable elimination
     else if (compacting ())
       compact (); // collect variables
@@ -323,6 +348,90 @@ int Internal::cdcl_loop_with_inprocessing () {
   return res;
 }
 
+int Internal::propagate_assumptions () {
+  if (proof)
+    proof->solve_query ();
+  if (opts.ilb) {
+    sort_and_reuse_assumptions ();
+    assert (opts.ilb == 2 || (size_t) level <= assumptions.size ());
+    stats.ilbtriggers++;
+    stats.ilbsuccess += (level > 0);
+    stats.levelsreused += level;
+    if (level) {
+      assert (control.size () > 1);
+      stats.literalsreused += num_assigned - control[1].trail;
+    }
+  }
+  init_search_limits ();
+  init_report_limits ();
+
+  int res = already_solved (); // root-level propagation is done here
+
+  int last_assumption_level = assumptions.size ();
+  if (constraint.size ())
+    last_assumption_level++;
+
+  if (!res) {
+    restore_clauses ();
+    while (!res) {
+      if (unsat)
+        res = 20;
+      else if (unsat_constraint)
+        res = 20;
+      else if (!propagate ()) {
+        // let analyze run to get failed assumptions
+        analyze ();
+      } else if (!external_propagate () || unsat) { // external propagation
+        if (unsat)
+          continue;
+        else
+          analyze ();
+      } else if (satisfied ()) { // found model
+        if (!external_check_solution () || unsat) {
+          if (unsat)
+            continue;
+          else
+            analyze ();
+        } else if (satisfied ())
+          res = 10;
+      } else if (search_limits_hit ())
+        break;                               // decision or conflict limit
+      else if (terminated_asynchronously ()) // externally terminated
+        break;
+      else {
+        if (level >= last_assumption_level)
+          break;
+        res = decide ();
+      }
+    }
+  }
+
+  if (unsat || unsat_constraint)
+    res = 20;
+
+  if (!res && satisfied ())
+    res = 10;
+
+  finalize (res);
+  reset_solving ();
+  report_solving (res);
+
+  return res;
+}
+
+void Internal::implied (std::vector<int> &entrailed) {
+  int last_assumption_level = assumptions.size ();
+  if (constraint.size ())
+    last_assumption_level++;
+
+  size_t trail_limit = trail.size ();
+  if (level > last_assumption_level)
+    trail_limit = control[last_assumption_level + 1].trail;
+
+  for (size_t i = 0; i < trail_limit; i++)
+    entrailed.push_back (trail[i]);
+}
+
 /*------------------------------------------------------------------------*/
 
 // Most of the limits are only initialized in the first 'solve' call and
@@ -332,6 +441,7 @@ int Internal::cdcl_loop_with_inprocessing () {
 void Internal::init_report_limits () {
   reported = false;
   lim.report = 0;
+  lim.recompute_tier = 5000;
 }
 
 void Internal::init_preprocessing_limits () {
@@ -343,18 +453,6 @@ void Internal::init_preprocessing_limits () {
     LOG ("initializing preprocessing limits and increments");
 
   const char *mode = 0;
-
-  /*----------------------------------------------------------------------*/
-
-  if (incremental)
-    mode = "keeping";
-  else {
-    lim.subsume = stats.conflicts + scale (opts.subsumeint);
-    mode = "initial";
-  }
-  (void) mode;
-  LOG ("%s subsume limit %" PRId64 " after %" PRId64 " conflicts", mode,
-       lim.subsume, lim.subsume - stats.conflicts);
 
   /*----------------------------------------------------------------------*/
 
@@ -378,7 +476,7 @@ void Internal::init_preprocessing_limits () {
 
   if (!incremental) {
 
-    last.ternary.marked = -1; // TODO explain why this is necessary.
+    last.ternary.marked = -1; // TODO this should not be necessary...
 
     lim.compact = stats.conflicts + opts.compactint;
     LOG ("initial compact limit %" PRId64 " increment %" PRId64 "",
@@ -390,12 +488,14 @@ void Internal::init_preprocessing_limits () {
   if (incremental)
     mode = "keeping";
   else {
-    lim.probe = stats.conflicts + opts.probeint;
+    double delta = log10 (stats.added.irredundant + 10);
+    delta = delta * delta;
+    lim.inprobe = stats.conflicts + opts.inprobeint * delta;
     mode = "initial";
   }
   (void) mode;
   LOG ("%s probe limit %" PRId64 " after %" PRId64 " conflicts", mode,
-       lim.probe, lim.probe - stats.conflicts);
+       lim.inprobe, lim.inprobe - stats.conflicts);
 
   /*----------------------------------------------------------------------*/
 
@@ -437,7 +537,7 @@ void Internal::init_search_limits () {
     mode = "keeping";
   else {
     last.reduce.conflicts = -1;
-    lim.reduce = stats.conflicts + opts.reduceint;
+    lim.reduce = stats.conflicts + opts.reduceinit;
     mode = "initial";
   }
   (void) mode;
@@ -463,6 +563,7 @@ void Internal::init_search_limits () {
 
   lim.rephase = stats.conflicts + opts.rephaseint;
   lim.rephased[0] = lim.rephased[1] = 0;
+  last.stabilize.rephased = 0;
   LOG ("new rephase limit %" PRId64 " after %" PRId64 " conflicts",
        lim.rephase, lim.rephase - stats.conflicts);
 
@@ -493,15 +594,18 @@ void Internal::init_search_limits () {
   } else
     LOG ("keeping non-stable phase");
 
-  inc.stabilize = opts.stabilizeint;
-  lim.stabilize = stats.conflicts + inc.stabilize;
-  LOG ("new stabilize limit %" PRId64 " after %" PRId64 " conflicts",
-       lim.stabilize, inc.stabilize);
+  inc.stabilize = 0;
+  last.stabilize.conflicts = stats.conflicts;
+  lim.stabilize = stats.conflicts + opts.stabilizeinit;
+  last.stabilize.ticks = stats.ticks.search[0];
+  stats.stabphases = 0;
+  LOG ("new ticks-based stabilize limit %" PRId64 " after %d conflicts",
+       lim.stabilize, (int) opts.stabilizeinit);
 
-  if (opts.stabilize && opts.reluctant) {
+  if (opts.stabilize && opts.reluctant && opts.reluctantint) {
     LOG ("new restart reluctant doubling sequence period %d",
          opts.reluctant);
-    reluctant.enable (opts.reluctant, opts.reluctantmax);
+    reluctant.enable (opts.reluctantint, opts.reluctantmax);
   } else
     reluctant.disable ();
 
@@ -524,9 +628,18 @@ void Internal::init_search_limits () {
     LOG ("no limit on decisions");
   } else {
     lim.decisions = stats.decisions + inc.decisions;
-    LOG ("conflict limit after %" PRId64 " decisions at %" PRId64
+    LOG ("decision limit after %" PRId64 " decisions at %" PRId64
          " decisions",
          inc.decisions, lim.decisions);
+  }
+
+  if (inc.ticks < 0) {
+    lim.ticks = -1;
+    LOG ("no limit on ticks");
+  } else {
+    lim.ticks = stats.ticks.search[0] + stats.ticks.search[1] + inc.ticks;
+    LOG ("ticks limit after %" PRId64 " ticks at %" PRId64 " ticks",
+         inc.ticks, lim.ticks);
   }
 
   /*----------------------------------------------------------------------*/
@@ -540,6 +653,41 @@ void Internal::init_search_limits () {
     lim.localsearch = inc.localsearch;
     LOG ("limiting to %" PRId64 " local search rounds", lim.localsearch);
   }
+
+  /*----------------------------------------------------------------------*/
+  // tier 1 and tier 2 limits
+  if (incremental && opts.recomputetier) {
+    for (auto m : {true, false})
+      for (auto &u : stats.used[m])
+        u = 0;
+    stats.bump_used = {0, 0};
+    for (auto u : {true, false}) {
+      tier1[u] = max (tier1[u], opts.tier1minglue ? opts.tier1minglue : 2);
+      tier2[u] = max (tier2[u], opts.tier2minglue ? opts.tier2minglue : 6);
+    }
+    stats.tierecomputed = 0;
+  }
+
+  /*----------------------------------------------------------------------*/
+  // clause decaying
+  if (incremental)
+    last.incremental_decay.last_id = 0;
+  else {
+    lim.incremental_decay = opts.incdecayint;
+  }
+
+  /*----------------------------------------------------------------------*/
+
+  if (incremental)
+    mode = "keeping";
+  else {
+    lim.random_decision = stats.conflicts + opts.randecinit;
+    mode = "initial";
+  }
+  (void) mode;
+  LOG ("%s randomize decision limit %" PRId64 " after %" PRId64
+       " conflicts",
+       mode, lim.random_decision, lim.random_decision - stats.conflicts);
 
   /*----------------------------------------------------------------------*/
 
@@ -568,12 +716,13 @@ bool Internal::preprocess_round (int round) {
          " clauses",
          round, before.vars, before.clauses);
   int old_elimbound = lim.elimbound;
-  if (opts.probe)
-    probe (false);
+  if (opts.inprobing)
+    inprobe (false);
   if (opts.elim)
     elim (false);
   if (opts.condition)
     condition (false);
+
   after.vars = active ();
   after.clauses = stats.current.irredundant;
   assert (preprocessing);
@@ -593,10 +742,74 @@ bool Internal::preprocess_round (int round) {
   return false;
 }
 
-int Internal::preprocess () {
+// for now counts as one of the preprocessing rounds TODO: change this?
+void Internal::preprocess_quickly (bool always) {
+  if (unsat)
+    return;
+  if (!max_var)
+    return;
+  if (!opts.preprocesslight)
+    return;
+  if (!always && stats.searches > 1)
+    return;
+  START (preprocess);
+#ifndef QUIET
+  struct {
+    int64_t vars, clauses;
+  } before, after;
+  before.vars = active ();
+  before.clauses = stats.current.irredundant;
+#endif
+  // stats.preprocessings++;
+  assert (!preprocessing);
+  preprocessing = true;
+  report ('(');
+  PHASE ("preprocessing", stats.preprocessings,
+         "starting with %" PRId64 " variables and %" PRId64 " clauses",
+         before.vars, before.clauses);
+
+  if (extract_gates (true))
+    decompose ();
+  binary_clauses_backbone ();
+
+  if (sweep ())
+    decompose ();
+
+  if (opts.factor)
+    factor ();
+
+  if (opts.fastelim)
+    elimfast ();
+    // if (opts.condition)
+    // condition (false);
+#ifndef QUIET
+  after.vars = active ();
+  after.clauses = stats.current.irredundant;
+#endif
+  assert (preprocessing);
+  preprocessing = false;
+  PHASE ("preprocessing", stats.preprocessings,
+         "finished with %" PRId64 " variables and %" PRId64 " clauses",
+         after.vars, after.clauses);
+  STOP (preprocess);
+  report ('P');
+}
+
+int Internal::preprocess (bool always) {
+  int res = 0;
+  if (!level && !unsat && opts.luckyearly)
+    res = lucky_phases ();
+  if (res)
+    return res;
+
+  if (opts.deduplicateallinit && !stats.deduplicatedinitrounds)
+    deduplicate_all_clauses ();
+
+  preprocess_quickly (always);
   for (int i = 0; i < lim.preprocessing; i++)
     if (!preprocess_round (i))
       break;
+  report (')');
   if (unsat)
     return 20;
   return 0;
@@ -636,8 +849,9 @@ int Internal::try_to_satisfy_formula_by_saved_phases () {
   force_saved_phase = false;
   if (external_prop) {
     private_steps = false;
-    LOG("external notifications are turned back on.");
-    if (!level) notify_assignments (); // In case fixed assignments were found.
+    LOG ("external notifications are turned back on.");
+    if (!level)
+      notify_assignments (); // In case fixed assignments were found.
     else {
       renotify_trail_after_local_search ();
     }
@@ -690,7 +904,11 @@ int Internal::local_search_round (int round) {
   else
     limit = LONG_MAX;
 
-  int res = walk_round (limit, true);
+  int res;
+  if (opts.walkfullocc)
+    res = walk_full_occs_round (limit, true);
+  else
+    res = walk_round (limit, true);
 
   assert (localsearching);
   localsearching = false;
@@ -734,16 +952,16 @@ int Internal::local_search () {
 
 // if preprocess_only is false and opts.ilb is true we do not preprocess
 // such that we do not have to backtrack to level 0.
-// TODO: check restore_clauses works on higher level
 //
 int Internal::solve (bool preprocess_only) {
   assert (clause.empty ());
+  stats.searches++;
   START (solve);
   if (proof)
     proof->solve_query ();
   if (opts.ilb) {
-    if (opts.ilbassumptions)
-      sort_and_reuse_assumptions ();
+    sort_and_reuse_assumptions ();
+    assert (opts.ilb || (size_t) level <= assumptions.size ());
     stats.ilbtriggers++;
     stats.ilbsuccess += (level > 0);
     stats.levelsreused += level;
@@ -751,7 +969,7 @@ int Internal::solve (bool preprocess_only) {
       assert (control.size () > 1);
       stats.literalsreused += num_assigned - control[1].trail;
     }
-    if (external->propagator) 
+    if (external->propagator)
       renotify_trail_after_ilb ();
   }
   if (preprocess_only)
@@ -764,18 +982,24 @@ int Internal::solve (bool preprocess_only) {
     backtrack ();
   if (!res)
     res = restore_clauses ();
-  if (!res) {
+  if (!res || (res == 10 && external_prop)) {
     init_preprocessing_limits ();
     if (!preprocess_only)
       init_search_limits ();
   }
-  if (!res && !level)
-    res = preprocess ();
   if (!preprocess_only) {
     if (!res && !level)
       res = local_search ();
-    if (!res && !level)
+  }
+  if (!res && !level)
+    res = preprocess (preprocess_only);
+  if (!preprocess_only) {
+    if (!res && !level && opts.luckylate)
       res = lucky_phases ();
+    if (!res && !level)
+      res = local_search ();
+    if (!res)
+      decay_clauses_upon_incremental_clauses ();
     if (!res || (res == 10 && external_prop)) {
       if (res == 10 && external_prop && level)
         backtrack ();
@@ -840,7 +1064,7 @@ int Internal::restore_clauses () {
     report ('*');
   } else {
     report ('+');
-    remove_garbage_binaries ();
+    // remove_garbage_binaries ();
     external->restore_clauses ();
     internal->report ('r');
     if (!unsat && !level && !propagate ()) {
@@ -881,7 +1105,7 @@ int Internal::lookahead () {
   STOP (lookahead);
   if (external_prop) {
     private_steps = false;
-    LOG("external notifications are turned back on.");
+    LOG ("external notifications are turned back on.");
     notify_assignments (); // In case fixed assignments were found.
   }
   return res;
@@ -894,51 +1118,54 @@ void Internal::finalize (int res) {
     return;
   LOG ("finalizing");
   // finalize external units
-  for (const auto &evar : external->vars) {
-    assert (evar > 0);
-    const auto eidx = 2 * evar;
-    int sign = 1;
-    uint64_t id = external->ext_units[eidx];
-    if (!id) {
-      sign = -1;
-      id = external->ext_units[eidx + 1];
-    }
-    if (id) {
-      proof->finalize_external_unit (id, evar * sign);
-    }
-  }
-  // finalize internal units
-  for (const auto &lit : lits) {
-    const auto elit = externalize (lit);
-    if (elit) {
-      const unsigned eidx = (elit < 0) + 2u * (unsigned) abs (elit);
-      const uint64_t id = external->ext_units[eidx];
+  if (frat) {
+    for (const auto &evar : external->vars) {
+      assert (evar > 0);
+      const auto eidx = 2 * evar;
+      int sign = 1;
+      int64_t id = external->ext_units[eidx];
+      if (!id) {
+        sign = -1;
+        id = external->ext_units[eidx + 1];
+      }
       if (id) {
-        assert (unit_clauses[vlit (lit)] == id);
-        continue;
+        proof->finalize_external_unit (id, evar * sign);
       }
     }
-    const auto uidx = vlit (lit);
-    const uint64_t id = unit_clauses[uidx];
-    if (!id)
-      continue;
-    proof->finalize_unit (id, lit);
-  }
-  // See the discussion in 'propagate' on why garbage binary clauses stick
-  // around.
-  for (const auto &c : clauses)
-    if (!c->garbage || c->size == 2)
-      proof->finalize_clause (c);
+    // finalize internal units
+    for (const auto &lit : lits) {
+      const auto elit = externalize (lit);
+      if (elit) {
+        const unsigned eidx = (elit < 0) + 2u * (unsigned) abs (elit);
+        const int64_t id = external->ext_units[eidx];
+        if (id) {
+          assert (unit_clauses (vlit (lit)) == id);
+          continue;
+        }
+      }
+      const int64_t id = unit_clauses (vlit (lit));
+      if (!id)
+        continue;
+      proof->finalize_unit (id, lit);
+    }
+    // See the discussion in 'propagate' on why garbage binary clauses stick
+    // around.
+    for (const auto &c : clauses)
+      if (!c->garbage || (c->size == 2 && !c->flushed))
+        proof->finalize_clause (c);
 
-  // finalize conflict and proof
-  if (conflict_id) {
-    proof->finalize_clause (conflict_id, {});
+    // finalize conflict and proof
+    if (conflict_id) {
+      proof->finalize_clause (conflict_id, {});
+    }
   }
   proof->report_status (res, conflict_id);
   if (res == 10)
     external->conclude_sat ();
   else if (res == 20)
     conclude_unsat ();
+  else if (!res)
+    external->conclude_unknown ();
 }
 
 /*------------------------------------------------------------------------*/
