@@ -116,7 +116,7 @@ void Internal::enlarge_vals (size_t new_vsize) {
     delete[] base_vals;
   } else
     assert (!vsize);
-    
+
   base_vals = new_base_vals;
   vals = new_vals;
 }
