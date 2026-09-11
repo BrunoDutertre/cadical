@@ -2,11 +2,11 @@
 /* Copyright (C) 2018-2021 Armin Biere, Johannes Kepler University Linz   */
 /* Copyright (C) 2020-2021 Mathias Fleury, Johannes Kepler University Linz*/
 /* Copyright (c) 2020-2021 Nils Froleyks, Johannes Kepler University Linz */
-/* Copyright (C) 2022-2025 Katalin Fazekas, Technical University of Vienna*/
-/* Copyright (C) 2021-2025 Armin Biere, University of Freiburg            */
-/* Copyright (C) 2021-2025 Mathias Fleury, University of Freiburg         */
-/* Copyright (C) 2023-2025 Florian Pollitt, University of Freiburg */
-/* Copyright (C) 2024-2024 Tobias Faller, University of Freiburg   */
+/* Copyright (C) 2022-2026 Katalin Fazekas, Technical University of Vienna*/
+/* Copyright (C) 2021-2026 Armin Biere, University of Freiburg            */
+/* Copyright (C) 2021-2026 Mathias Fleury, University of Freiburg         */
+/* Copyright (C) 2023-2026 Florian Pollitt, University of Freiburg */
+/* Copyright (C) 2024-2026 Tobias Faller, University of Freiburg   */
 /*------------------------------------------------------------------------*/
 
 // Model Based Tester for the CaDiCaL SAT Solver Library.
@@ -186,8 +186,15 @@ void initialize_allocators () {
   libc_realloc = reinterpret_cast<realloc_t> (dlsym (RTLD_NEXT, "realloc"));
   libc_free = reinterpret_cast<free_t> (dlsym (RTLD_NEXT, "free"));
 }
-__attribute__ ((section (".preinit_array"))) void (*init_allocators_ptr) (
-    void) = initialize_allocators;
+//__attribute__ ((section (".preinit_array"))) void (*init_allocators_ptr) (
+//    void) = initialize_allocators;
+// REVIEW: ^^ this does not work on apple ^^ vv this seemed to work vv
+#ifdef __APPLE__
+__attribute__ ((section ("__DATA,__mod_init_func")))
+#else
+__attribute__ ((section (".preinit_array")))
+#endif
+void (*init_allocators_ptr) (void) = initialize_allocators;
 #endif
 
 /*------------------------------------------------------------------------*/
@@ -334,6 +341,7 @@ private:
   size_t must_add_idx;
   // Next decision to make
   size_t decision_loc = 0;
+  size_t forced_bt = 0;
 
   // Observed variables and their current assignments
   std::set<int> observed_variables;
@@ -804,13 +812,14 @@ public:
         current_observed_satisfied_set (lit_sum, lowest_lit, highest_lit);
 
     if ((decision_loc % observed_variables.size ()) == 0) {
-      if (!(observed_variables.size () % 11) &&
+      if (!((observed_variables.size () + forced_bt) % 11) &&
           observed_trail.size () > 1) {
         int target = std::min (observed_variables.size () % 5,
                                observed_trail.size () - 2);
         MLOG ("cb_decide forces backtracking to level " << target
                                                         << std::endl);
         s->force_backtrack (target);
+        forced_bt++;
       }
       size_t n = decision_loc / observed_variables.size ();
       auto is_unassigned = [satisfied_literals] (int lit) {
@@ -2056,7 +2065,8 @@ public:
   SIGNAL (SIGTERM) \
   SIGNAL (SIGBUS) \
   SIGNAL (SIGUSR1) \
-  SIGNAL (SIGUSR2)
+  SIGNAL (SIGUSR2) \
+  SIGNAL (SIGTSTP)
 
 #define SIGNAL(SIG) static void (*old_##SIG##_handler) (int);
   SIGNALS
@@ -2179,6 +2189,8 @@ public:
     bool first = true;
     bool deallocated = false;
     for (size_t i = 0; i < calls.size (); i++) {
+      if (Signal::interrupted ())
+        break;
       Call *c = calls[i];
 
 #ifdef MOBICAL_MEMORY
@@ -2194,8 +2206,8 @@ public:
         // They are (ideally) are executed already
         if (c->type == Call::LEMMA)
           continue;
-          // if (c->type == Call::CONTINUE)
-          //   continue;
+        // if (c->type == Call::CONTINUE)
+        //   continue;
 #ifdef MOBICAL_MEMORY
         if (c->type == Call::MAXALLOC) {
           memory_bad_alloc = c->val;
@@ -3344,7 +3356,11 @@ void Trace::child_signal_handler (int sig) {
 
   struct rusage u;
   if (!getrusage (RUSAGE_SELF, &u)) {
+#ifndef __APPLE__
     if ((int64_t) u.ru_maxrss >> 10 >= mobical.space_limit) {
+#else
+    if ((int64_t) u.ru_maxrss >> 20 >= mobical.space_limit) {
+#endif
       if (mobical.shared)
         mobical.shared->memout++;
       // Since there is no memout signal we just misuse SIXCPU to notify the
@@ -3361,6 +3377,7 @@ void Trace::child_signal_handler (int sig) {
     }
   }
   reset_child_signal_handlers ();
+  Signal::reset ();
   raise (sig);
 }
 
@@ -3548,6 +3565,10 @@ int Trace::fork_and_execute () {
 
     executed++;
 
+    // If SIGTSTP is used in the future rather use waitpid & WUNTRACED
+    // int status;
+    // pid_t other = waitpid (child, &status, WUNTRACED);
+
     int status, other = wait (&status);
     if (other != child)
       res = 0;
@@ -3651,13 +3672,18 @@ bool Trace::shrink_segments (Trace::Segments &segments, int expected) {
         if (!ignore[i])
           tmp.push_back (calls[i]->copy ());
       progress ();
-      if (tmp.fork_and_execute () != expected) { // failed
+      if (tmp.fork_and_execute () != expected ||
+          Signal::received ()) { // failed
         for (size_t i = l; i < r; i++)
           removed[i] = saved[i];
       } else {
         res = true; // succeeded to shrink
       }
+      if (Signal::interrupted ())
+        break;
     }
+    if (Signal::interrupted ())
+      break;
     if (granularity == 1)
       break;
     granularity = (granularity + 1) / 2;
@@ -3779,6 +3805,8 @@ void Mobical::notify (Trace &trace, signed char ch) {
 bool Trace::shrink_phases (int expected) {
   if (mobical.donot.shrink.phases)
     return false;
+  if (Signal::interrupted ())
+    return false;
   notify ('p');
   size_t l;
   for (l = 1; l < size () && config_type (calls[l]->type); l++)
@@ -3813,6 +3841,8 @@ bool Trace::shrink_phases (int expected) {
 bool Trace::shrink_clauses (int expected) {
   if (mobical.donot.shrink.clauses)
     return false;
+  if (Signal::interrupted ())
+    return false;
   notify ('c');
   Segments segments;
   for (size_t r = size (), l; r > 1; r = l) {
@@ -3831,6 +3861,8 @@ bool Trace::shrink_clauses (int expected) {
 
 bool Trace::shrink_lemmas (int expected) {
   if (mobical.donot.shrink.lemmas)
+    return false;
+  if (Signal::interrupted ())
     return false;
   notify ('u');
   Segments segments;
@@ -3852,6 +3884,8 @@ bool Trace::shrink_lemmas (int expected) {
 //
 bool Trace::shrink_literals (int expected) {
   if (mobical.donot.shrink.literals)
+    return false;
+  if (Signal::interrupted ())
     return false;
   notify ('l');
   Segments segments;
@@ -3899,6 +3933,8 @@ static bool is_basic (Call *c) {
 
 bool Trace::shrink_basic (int expected) {
   if (mobical.donot.shrink.basic)
+    return false;
+  if (Signal::interrupted ())
     return false;
   notify ('b');
   Segments segments;
@@ -3964,6 +4000,8 @@ bool Trace::shrink_disable (int expected) {
 
   if (mobical.donot.disable)
     return false;
+  if (Signal::interrupted ())
+    return false;
   const int max_var = vars ();
 
   notify ('d');
@@ -4007,7 +4045,7 @@ bool Trace::shrink_disable (int expected) {
       if (!reduce)
         continue;
       progress ();
-      if (fork_and_execute () == expected)
+      if (fork_and_execute () == expected && !Signal::interrupted ())
         res = true;
       else {
         for (size_t j = i; j < n && j < i + granularity; j++) {
@@ -4017,7 +4055,11 @@ bool Trace::shrink_disable (int expected) {
           c->val = saved[j];
         }
       }
+      if (Signal::interrupted ())
+        break;
     }
+    if (Signal::interrupted ())
+      break;
     if (granularity == 1)
       break;
     granularity = (granularity + 1) / 2;
@@ -4032,6 +4074,8 @@ bool Trace::reduce_values (int expected) {
 
   if (mobical.donot.reduce)
     return false;
+  if (Signal::interrupted ())
+    return false;
 
   notify ('r');
 
@@ -4039,6 +4083,10 @@ bool Trace::reduce_values (int expected) {
 
   bool changed = false, res = false;
   do {
+    if (Signal::interrupted ()) {
+      res = false;
+      break;
+    }
     if (changed)
       res = true;
     changed = false;
@@ -4082,12 +4130,20 @@ bool Trace::reduce_values (int expected) {
       int old_val = c->val;
       c->val = lo;
       progress ();
-      if (fork_and_execute () == expected) {
+
+      bool success =
+          (fork_and_execute () == expected) && !Signal::interrupted ();
+      if (success) {
         assert (c->val != old_val);
         changed = true;
+      } else
+        c->val = old_val;
+
+      if (Signal::interrupted ())
+        break;
+
+      if (success)
         continue;
-      }
-      c->val = old_val;
 
       // Then try to limit to the high value if current value too large.
       //
@@ -4095,13 +4151,18 @@ bool Trace::reduce_values (int expected) {
         int old_val = c->val;
         c->val = hi;
         progress ();
-        if (fork_and_execute () == expected) {
+        bool success =
+            (fork_and_execute () == expected) && !Signal::interrupted ();
+        if (success) {
           assert (c->val != old_val);
           changed = true;
-        } else {
+        } else
           c->val = old_val;
+
+        if (Signal::interrupted ())
+          break;
+        if (!success)
           continue;
-        }
       }
 
       // Now we do a delta-debugging inspired binary search for the smallest
@@ -4119,11 +4180,13 @@ bool Trace::reduce_values (int expected) {
         assert (new_val <= hi);
         c->val = new_val;
         progress ();
-        if (fork_and_execute () == expected) {
+        if ((fork_and_execute () == expected) && !Signal::interrupted ()) {
           assert (c->val != old_val);
           changed = true;
         } else
           c->val = old_val;
+        if (Signal::interrupted ())
+          break;
       }
     }
   } while (changed);
@@ -4158,6 +4221,8 @@ static bool has_lit_arg_type (Call *c) {
 
 void Trace::map_variables (int expected) {
   if (mobical.donot.map)
+    return;
+  if (Signal::interrupted ())
     return;
   for (int with_gaps = 0; with_gaps <= 1; with_gaps++) {
     notify ('m');
@@ -4208,7 +4273,8 @@ void Trace::map_variables (int expected) {
         mapped.push_back (c->copy ());
     }
     progress ();
-    if (mapped.fork_and_execute () == expected) {
+    if ((mapped.fork_and_execute () == expected) &&
+        !Signal::interrupted ()) {
       clear ();
       for (size_t i = 0; i < mapped.size (); i++)
         push_back (mapped[i]->copy ());
@@ -4216,6 +4282,8 @@ void Trace::map_variables (int expected) {
       with_gaps = 2;
     }
     notify ();
+    if (Signal::interrupted ())
+      break;
   }
 }
 
@@ -4225,7 +4293,8 @@ void Trace::shrink_options (int expected) {
 
   if (mobical.donot.shrink.options)
     return;
-
+  if (Signal::interrupted ())
+    return;
   notify ('o');
   Segments segments;
   for (size_t i = 0; i < size (); i++) {
@@ -4281,7 +4350,8 @@ void Trace::shrink (int expected) {
   shrink_options (expected);
   // Execute one last time to get accurate results when memory fuzzing
   // is enabled.
-  fork_and_execute ();
+  if (!Signal::interrupted ())
+    fork_and_execute ();
   cerr << flush;
   mobical.shrinking = false;
 }
@@ -4960,13 +5030,15 @@ Mobical::~Mobical () {
     delete mock_pointer;
 }
 
-void Mobical::catch_signal (int) {
-  if ((terminal && (mode & RANDOM)) || shrinking || running)
-    cerr << endl;
-  terminal.reset ();
-  if (Trace::executed && !Trace::failed && !Trace::ok)
-    assert (mode & (INPUT | SEED)), Trace::failed = 1;
-  print_statistics ();
+void Mobical::catch_signal (int sig) {
+  Signal::set_received (sig);
+
+  if (!(mode & RANDOM) && !shrinking) {
+    if (Trace::executed && !Trace::failed && !Trace::ok)
+      assert (mode & (INPUT | SEED)), Trace::failed = 1;
+    Signal::reset ();
+    ::raise (sig);
+  }
 }
 
 /*------------------------------------------------------------------------*/
@@ -5472,6 +5544,9 @@ END_OF_BANNER_AND_OPTIONS:
 
     for (traces = 1; traces <= limit; traces++) {
 
+      if (Signal::interrupted ())
+        break;
+
       if (!quiet && !donot.seeds) {
         prefix ();
         cerr << ' ' << left << setw (15) << traces << ' ';
@@ -5565,10 +5640,18 @@ END_OF_BANNER_AND_OPTIONS:
     }
   }
 
+  const int sig = Signal::received ();
+  const bool reraise = Signal::interrupted ();
   Signal::reset ();
 
+  if (reraise)
+    if ((terminal && (mode & RANDOM)) || shrinking || running)
+      cerr << endl;
   terminal.reset ();
   print_statistics ();
+
+  if (reraise)
+    raise (sig);
 
   return Trace::failed > 0;
 }
